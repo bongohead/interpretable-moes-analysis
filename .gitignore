@@ -1,0 +1,24 @@
+# Misc
+.env
+*.csv
+*.db
+*.env
+*.html
+*.pt
+
+# Python
+.venv
+__pycache__
+.ipynb_checkpoints
+
+# R
+.Rproj.user
+
+# Stored models
+**/hf/*
+**/models/*
+**/wandb/*
+
+# Data
+*.json
+samples_*.yaml
