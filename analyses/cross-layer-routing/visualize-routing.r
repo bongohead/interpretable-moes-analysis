@@ -1,7 +1,7 @@
 library(tidyverse)
 library(highcharter)
 
-raw_routing = read_csv('analyses/export_2.csv')
+raw_routing = read_csv('analyses/export_0.csv')
 cluster_rate = 4
 
 n_layers = length(unique(raw_routing$layer))
@@ -76,11 +76,15 @@ chart_data =
 		from, 
 		to,
 		color = ifelse(prop == 0, 'transparent', NA),
-		weight = ifelse(prop == 0, .001, prop/100),
+		weight = ifelse(prop == 0, .001, prop/50),
 		)
 	
 highchart() %>%
-	hc_chart(type = "sankey") %>%
+	hc_chart(
+		type = "sankey",
+		marginLeft = 40,  # Add left margin for y-axis label
+		marginBottom = 40 # Add bottom margin for x-axis label
+		) %>%
 	hc_title(text = "Expert Routing for Token `:`, Context 2") %>%
 	hc_add_series(
 		name = "Expert Flow",
@@ -94,7 +98,6 @@ highchart() %>%
 	hc_plotOptions(sankey = list(
 		animation = FALSE,
 		nodeWidth = 1,
-		# nodeDistance = 2,
 		nodePadding = 10,
 		curveFactor = 0.15,
 		linkOpacity = 1.0,
@@ -102,7 +105,32 @@ highchart() %>%
 			hover = list(enabled = FALSE)
 		)
 	)) %>%
+	hc_subtitle(
+		text = 'Layer Index',
+		align = "center",
+		verticalAlign = "bottom",
+		y = 20 # Position near bottom
+	) %>%
 	hc_credits(enabled = FALSE) %>%
-	hc_exporting(enabled = FALSE)
-
+	hc_exporting(enabled = FALSE) %>%
+	# Y-axis
+	hc_chart(
+		events = list(
+			load = JS(sprintf("function() {
+          var chart = this;
+          // Add y-axis label
+          chart.renderer.text('%s', 20, chart.chartHeight/2)
+            .attr({
+              rotation: 270,
+              align: 'center'
+            })
+            .css({
+              color: '#666666',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            })
+            .add();
+        }", 'Expert ID'))
+		)
+	)
 

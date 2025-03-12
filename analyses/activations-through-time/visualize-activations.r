@@ -1,11 +1,11 @@
 library(tidyverse)
 library(bit64)
 # Bash: scp -i id_rsa_runpod -P 47343 root@195.26.232.156:/workspace/interpretable-moes/experiments/base-olmoe-lflb/logs/*.csv /data
-# PS: scp -P 47343 root@195.26.232.156:"/workspace/interpretable-moes/experiments/base-olmoe-lflb/logs/*.csv" data
+# PS: scp -P 24439 root@195.26.232.184:"/workspace/interpretable-moes/experiments/base-olmoe-lflb/logs/*.csv" data
 
 
 # Get Data ----------------------------------------------------------------
-files = sort(fs::dir_ls('data'))
+files = sort(fs::dir_ls('./analyses/training-dynamics/data'))
 raw_data = list_rbind(imap(files, function(i, fname) {
 	
 	total_tokens_trained =
@@ -31,7 +31,7 @@ raw_data = list_rbind(imap(files, function(i, fname) {
 	return(res)
 }))
 
-token_map = transmute(read_csv('vocab.csv'), token_id, token = display_form)
+token_map = transmute(read_csv('./analyses/training-dynamics/vocab.csv'), token_id, token = display_form)
 
 
 # Base Stats --------------------------------------------------------------
@@ -51,8 +51,8 @@ train_steps = count(raw_data, train_ix)
 # Visualizations ----------------------------------------------------------
 counts_by_layer_expert_train =
 	raw_data %>% 
-	filter(., token_id == 5754) %>%
-	filter(., train_ix %in% c(524288, 105379948, 1049078433, 2097632210, 5243291559)) %>%
+	filter(., token_id == 2656) %>%
+	filter(., train_ix %in% c(419953198 , 629668374 , 839381627, 1049095797, 2097665588 , 3355952795   )) %>%
 	group_by(., layer_ix, expert_id, train_ix) %>%
 	summarize(., n = n(), .groups = 'drop') %>%
 	group_by(., layer_ix, train_ix) %>%
@@ -65,12 +65,25 @@ counts_by_layer_expert_train =
 		) %>%
 	mutate(., n = replace_na(n, 0), prop = replace_na(prop, 0))
 
+raw_data %>%
+	filter(., token_id == 253 & topk_slot %in% 0:1) %>%
+	filter(., train_ix == 3355952795) %>%
+	filter(layer_ix == 0) %>%
+	count(expert_id) %>%
+	right_join(tibble(expert_id = 1:64), by = 'expert_id') %>%
+	mutate(., n = replace_na(n, 0)) %>%
+	mutate(n = n/sum(n)) %>%
+	ggplot() +
+	geom_bar(aes(x = expert_id, y = n), stat = 'identity', fill = 'forestgreen') +
+	theme_minimal() + 
+	labs(x = 'Expert ID', y = 'Routing Proportion')
+	
 
 counts_by_layer_expert_train %>% 
-	filter(., layer_ix == 1) %>%
+	filter(., layer_ix == 0) %>%
 	mutate(
 		# Create a factor with levels in the correct order
-		train_ix_ordered = factor(train_ix, levels = c(524288, 105379948, 1049078433, 2097632210)),
+		train_ix_ordered = factor(train_ix, levels =  c(419953198 , 629668374 , 839381627, 1049095797, 2097665588 , 3355952795   )),
 		# Add the formatted label for display
 		train_ix_formatted = case_when(
 			train_ix < 1e6 ~ sprintf("%.2fK", train_ix/1e3),
@@ -114,10 +127,57 @@ counts_by_layer_expert_train %>%
 		panel.grid.major = element_line(color = "gray90"),
 		panel.grid.minor = element_line(color = "gray95", linewidth = 0.3)
 	) +
-	facet_wrap(vars(facet_label), nrow = 1) +
+	facet_wrap(vars(facet_label), nrow = 2) +
 	labs(x = NULL, y = NULL) +
 	ggthemes::theme_fivethirtyeight()
 
+library(highcharter)
+
+create_radial_expert_usage_simplified <- function(counts_by_layer_expert_train) {
+	# Similar data preparation as before
+	
+	# Create a single multi-series chart instead
+	hc <- highchart() %>%
+		hc_chart(polar = TRUE) %>%
+		hc_title(text = "Expert Usage Distribution by Training Step") %>%
+		hc_xAxis(
+			categories = 0:63,
+			tickmarkPlacement = "on",
+			lineWidth = 0,
+			labels = list(enabled = FALSE)
+		) %>%
+		hc_yAxis(
+			max = 1^0.3,
+			min = 0,
+			labels = list(enabled = FALSE),
+			gridLineColor = "rgba(200, 200, 200, 0.3)"
+		) %>%
+		hc_plotOptions(
+			series = list(
+				animation = FALSE,
+				pointPadding = 0,
+				groupPadding = 0
+			)
+		)
+	
+	# Add each training step as a separate series
+	for(step in unique(plot_data$train_ix)) {
+		step_data <- plot_data %>% filter(train_ix == step)
+		step_name <- step_data$train_ix_formatted[1]
+		
+		hc <- hc %>% hc_add_series(
+			type = "column",
+			name = step_name,
+			data = step_data$prop_transformed,
+			visible = FALSE  # Start with only the first series visible
+		)
+	}
+	
+	# Make first series visible
+	hc$x$hc_opts$series[[1]]$visible <- TRUE
+	
+	return(hc)
+}
 
 
 

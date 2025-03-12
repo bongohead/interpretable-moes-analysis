@@ -21,4 +21,3 @@ __pycache__
 
 # Data
 *.json
-samples_*.yaml
