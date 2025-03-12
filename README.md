@@ -24,4 +24,4 @@ Before running analysis code, run through the following setup:
 <p align="center"><img src="images/expert-distribution-over-time.png" width="400px"></p>
 
 2. `analysis/cross-layer-routing` contains code to visualize the routing flow across different layers.
-<p align="center"><img src="images/cross-layer-routing.png" width="400px"></p>
+<p align="center"><img src="images/cross-layer-routing-1.png" width="400px"></p>
