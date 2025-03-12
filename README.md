@@ -1,9 +1,9 @@
-# About
+## About
 This contains code for visualizations and intepretability analyses linked to the [interpretable-moes](https://github.com/bongohead/interpretable-moes) project.
 
 The folder `analysis` contains all code for visualizations/interpretability.
 
-# Setup
+## Setup
 Before running analysis code, run through the following setup:
 
 1. First, clone this repo: `git clone https://github.com/bongohead/interpretable-moes-analysis`.
@@ -19,7 +19,7 @@ Before running analysis code, run through the following setup:
         - **Setup**: Place any saved pytorch models for various analyses here.
 
 
-# Analysis Direcotires
+## Analysis Direcotires
 1. `analysis/activations-through-time` contains code to analyze and understand expert routing distributions through time.
 <p align="center"><img src="images/expert-distribution-over-time.png" width="400px"></p>
 
