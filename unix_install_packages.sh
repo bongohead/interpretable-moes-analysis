@@ -1,5 +1,4 @@
-# Install necessary packages
-pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+pip install torch
 pip install bitsandbytes==0.45.2
 pip install transformers==4.48.3
 pip install jupyter lab

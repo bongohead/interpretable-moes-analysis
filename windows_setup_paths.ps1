@@ -23,6 +23,6 @@ if (-Not (Test-Path $pythonExe)) {
 $sitePkgDir = & $pythonExe -c "import site; print(site.getsitepackages()[0])"
 
 # Create the .pth file in the virtual environment's site-packages directory
-$projectPath | Out-File -FilePath "$sitePkgDir\add_path.pth" -Encoding utf8
+$projectPath | Out-File -FilePath "$sitePkgDir\add_path_analysis.pth" -Encoding utf8
 
 Write-Host "Added path '$projectPath' to site-packages in virtual environment at '$venvPath'"

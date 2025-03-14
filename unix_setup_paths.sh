@@ -1,0 +1,1 @@
+echo "/workspace/interpretable-moes-analysis" > $(python -c "import site; print(site.getsitepackages()[0])")/add_path_analysis.pth

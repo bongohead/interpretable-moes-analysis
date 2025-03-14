@@ -7,7 +7,7 @@ The folder `analysis` contains all code for visualizations/interpretability.
 Before running analysis code, run through the following setup:
 
 1. First, clone this repo: `git clone https://github.com/bongohead/interpretable-moes-analysis`.
-2. Then, run `windows_install_packages.ps1` and `windows_setup_paths.ps1` to setup the Python environment.
+2. On unix, run `sh install_packages.sh` and `sh unix_setup_paths.sh` to setup the Python environment. On Windows, run `windows_install_packages.ps1` and `windows_setup_paths.ps1`.
 3. The `datasets` directory contains subdirectories with data re-used across multiple analyses. Some require additional setup.
     - `contextual-tokens`: A directory of YAML files containing text samples.
         - Each file corresponds to a single polysemantic token with 3 meanings. The file will contain a set of text samples corresponding to each of those 3 meanings. 
