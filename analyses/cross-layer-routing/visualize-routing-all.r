@@ -171,4 +171,6 @@ grid_charts = hw_grid(
 	rowheight = 600
 	)
 
+# htmlwidgets::saveWidget(grid_charts, 'routes2.html', selfcontained = T)
+
 htmltools::save_html(grid_charts, 'routes_turbo.html', libdir = 'routes-lib')
