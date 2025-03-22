@@ -18,7 +18,8 @@ vocab_df =
 	transmute(., token_id, token = display_form)
 
 
-# Calculate Topk Distribution ---------------------------------------------
+# Initial Checks
+## Calculate Topk Distribution ---------------------------------------------
 local({
 	
 	routes_df %>%
@@ -38,6 +39,9 @@ local({
 })
 
 # Clustering --------------------------------------------------------------
+
+## Top Routes --------------------------------------------------------------
+
 local({
 	
 	# Identify top clusters - for each combination 
