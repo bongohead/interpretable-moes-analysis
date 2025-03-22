@@ -29,3 +29,5 @@ Before running analysis code, run through the following setup:
 3. `analysis/mmlu-ablation-tests` contains code to analyze the performance several pretrained MoE models (Qwen2-MoE, OlMoE, Deepseek V2 Lite) on MMLU. These are to test expert specialization by analyzing the impact on MMLU scores of layer-specific expert ablation tests and logit lens. This folder also contains routing visualization code for pretrained models, split across both MMLU subjects and polysemantic tokens.
 <p align="center"><img src="images/mmlu-ablation-tests.png" width="380px"><br><em>MMLU ablation tests</em></p>
 <p align="center"><img src="images/topk-dist-by-layer.png" width="400px"><br><em>Topk distribution by layer</em></p>
+
+4. `analysis/path-analysis` contains code to test different routing *paths* of models and understand path semantic correlations.
