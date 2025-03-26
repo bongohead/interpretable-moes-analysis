@@ -15,33 +15,29 @@ def export_vocab_as_csv(tokenizer, output_file: str):
     """
     # Get the vocabulary as a dictionary of token -> token_id
     vocab = tokenizer.get_vocab()
-
-    # Sort by token_id for a consistent output
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[1])
 
     with open(output_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
+        writer.writerow(['token_id', 'raw_token', 'token'])
 
-        # Write header
-        writer.writerow(['token_id', 'token', 'display_form'])
+        for raw_token, token_id in sorted_vocab:
+            cleaned = raw_token
+            cleaned = cleaned.replace("Ġ", " ")
+            cleaned = cleaned.replace("▁", " ")
+            cleaned = cleaned.replace("Ċ", "\n")
 
-        # Write each token and its ID
-        for token, token_id in sorted_vocab:
-            # Create a more readable representation
-            if token.startswith('Ġ'):  # This is a common prefix in GPT-2 tokenizer for space
-                display_form = f" {token[1:]}"
-            elif token.startswith('Ċ'):  # Common for newline
-                display_form = "[NEWLINE]"
-            elif token.startswith('▁'):  # Space in some other tokenizers
-                display_form = f" {token[1:]}"
-            elif len(token) == 1 and ord(token) < 32:  # Control characters
-                display_form = f"[CTRL-{ord(token)}]"
-            elif token.isprintable():
-                display_form = token
-            else:
-                # Show as hex for unprintable characters
-                display_form = ''.join(f'\\x{ord(c):02x}' for c in token)
+            # Now handle control characters or unprintable stuff - we'll say "unprintable" if ANY char is not .isprintable().
+            if not all(ch.isprintable() or ch.isspace() for ch in cleaned):
+                # Convert any unprintable to hex escapes:
+                cleaned_hex = []
+                for ch in cleaned:
+                    if ch.isprintable() or ch.isspace():
+                        cleaned_hex.append(ch)
+                    else:
+                        cleaned_hex.append(f'\\x{ord(ch):02x}')
+                cleaned = ''.join(cleaned_hex)
 
-            writer.writerow([token_id, token, display_form])
+            writer.writerow([token_id, raw_token, cleaned])
 
         print(f"CSV file has been created: {output_file}")
