@@ -341,7 +341,7 @@ local({
 		return(route_counts_final)
 	}
 	
-	paths = get_path_clusters(sample_df_top1, c(1:6), .entropy = F)
+	paths = get_path_clusters(sample_df_top1, c(2:6), .entropy = F)
 		
 	paths %>%
 		sample_n(., 10000) %>%
@@ -353,15 +353,84 @@ local({
 			token_samples,
 			token_samples_with_context
 			) %>%
-		write_csv(., str_glue('{model_prefix}-paths-1-to-6.csv'))
+		write_csv(., str_glue('{model_prefix}-paths-2-to-6.csv'))
 })
+
+
+paths2 = get_path_clusters(sample_df_top1, c(2:4), .entropy = F)
+
+paths2 %>% 
+	filter(str_detect(path_str, '\\[l4\\] 1$')) %>%
+	filter(str_detect(path_str, '\\[l2\\] 13 ->')) %>%
+	View()
+
+paths3 = get_path_clusters(sample_df_top1, c(6:8), .entropy = F)
+
+paths3 %>% 
+	filter(str_detect(path_str, '\\[l4\\] 1$')) %>%
+	filter(str_detect(path_str, '\\[l2\\] 13 ->')) %>%
 	
+paths3 %>%
+	filter(., str_detect(path_str, '\\[l8\\] 1')) %>% 
+	filter(., str_detect(path_str, '\\[l7\\] 1 ->'))
+	
+
+
+sample_df_top1 %>%
+	filter(., token_id == 27) %>%
+	unnest_longer(route, indices_to = 'layer_id') %>%
+	transmute(
+		.,
+		sample_ix,
+		token_context,
+		layer_id = layer_id - 1,s
+		expert = route
+		) %>%
+	count(layer_id, expert) %>%
+	View()
+
+
+## Graph of all paths most strongly associated with token :
+paths3 %>% filter(., str_detect(path_str, '\\[l8\\] 25$')) %>% View()
+
+
+
+# Get path predictability using first2 toks
+uniq_paths =
+	routes_df %>%
+	filter(., layer_ix == 0 & topk_ix == 1) %>%
+	head(., 1e7) %>%
+	group_by(., seq_id) %>%
+	mutate(., prev_token_id = lag(token_id, 1)) %>%
+	ungroup() %>%
+	filter(., is_start_of_seq != 1) %>%
+	mutate(., tid_combo = paste0(prev_token_id, '-', token_id)) %>%
+	group_by(., tid_combo, expert) %>%
+	summarize(
+		.,
+		n_samples_for_tid_rte = n(),
+		.groups = 'drop'
+	) 
+
+most_common_per_group =
+	uniq_paths %>%
+	group_by(., tid_combo) %>%
+	filter(., n_samples_for_tid_rte == max(n_samples_for_tid_rte)) %>%
+	slice_head(., n = 1) %>%
+	ungroup()
+
+
+
+
+uniq_paths %>%
+	View()
+
 ## Fixed Indices, Token Level ----------------------------------------------------
 local({
 	
 	# View most common toks
 	sample_df_top1 %>%
-		count(token) %>%
+		count(token, token_id) %>%
 		arrange(desc(n)) %>% 
 		view()
 	
