@@ -4,10 +4,10 @@ import torch
 @torch.no_grad()
 def convert_outputs_to_df(input_ids: torch.Tensor, attention_mask: torch.Tensor, output_logits: torch.Tensor) -> pd.DataFrame:
     """
-    Converts batch output logits into a pandas dataframe for later analysis. Skips positions where attention_mask == 0 (i.e., padding).
+    Create a sample (token) level dataframe from inputs ids and output logits. Skips positions where attention_mask == 0 (i.e., padding).
 
     Params:
-        @input_ids: A tensor of input IDs of size B x N
+        @input_ids: A tensor of input ids of size B x N
         @attention_mask: A tensor of 1 for real tokens, 0 for padding, of size B x N
         @output_logits: A B x N x V tensor of output logits
 
@@ -59,7 +59,7 @@ def convert_outputs_to_df(input_ids: torch.Tensor, attention_mask: torch.Tensor,
         "token_ix": flat_token_ix[valid_positions].numpy(),
         "token_id": flat_input_ids[valid_positions].numpy(),
         "output_id": flat_top_ids[valid_positions].numpy(),
-        "output_prob": flat_top_probs[valid_positions].numpy(),
+        "output_prob": flat_top_probs[valid_positions].numpy().round(2),
     }
     df = pd.DataFrame(data)
     return df

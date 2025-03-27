@@ -31,3 +31,8 @@ Before running analysis code, run through the following setup:
 <p align="center"><img src="images/topk-dist-by-layer.png" width="400px"><br><em>Topk distribution by layer</em></p>
 
 4. `analysis/path-analysis` contains code to test different routing *paths* of models and understand path semantic correlations.
+
+5. `analysis/mmlu-activation-study` contains code to run and analyze the domain-level results of MMLU by expert routing paths. The goal is to understand whether routes correlate to specific domains, and how routes behave more generally in a controlled environment on a single token with different context.
+<p align="center"><img src="images/mmlu-domains-umap.png" width="400px"><br><em>UMAP embeddings of l1 - l16 routing paths with Hamming distance</em></p>
+<p align="center"><img src="images/mmlu-math-routings.png" width="400px"><br><em>Routing of math versus non-math MMLU problems</em></p>
+<p align="center"><img src="images/mmlu-path-coverage.png" width="400px"><br><em>Percent of each l1-l10 path assigned to each MMLU domain</em></p>

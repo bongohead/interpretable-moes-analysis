@@ -56,7 +56,7 @@ def convert_topk_to_df(input_ids: torch.Tensor, attention_mask: torch.Tensor, al
         layer_experts_np = layer_experts.cpu().numpy()
         # If weights are provided, convert once for this layer
         if all_topk_weights is not None:
-            layer_weights_np = all_topk_weights[layer_ix].cpu().numpy()  # shape [B*N, top_k]
+            layer_weights_np = all_topk_weights[layer_ix].cpu().numpy().round(2)  # shape [B*N, top_k]
         else:
             layer_weights_np = None
             
