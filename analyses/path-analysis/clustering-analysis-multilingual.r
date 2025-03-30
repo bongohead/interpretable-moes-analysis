@@ -2,7 +2,7 @@
 ## Load Libs ---------------------------------------------------------------
 library(tidyverse)
 library(data.table)
-library(slider, include.only = 'slide_index_chr')
+library(slider, include.only = c('slide_chr', 'slide_index_chr'))
 library(uwot, include.only = 'umap')
 library(dbscan, include.only = c('hdbscan', 'dbscan'))
 library(rnndescent)
@@ -17,10 +17,50 @@ get_entropy = function(counts) {
 	-sum(p * log2(p))
 }
 
+# # Assumes that if token has a space in it, the first token must have a space
+# sample_df_0 %>%
+# 	head(., 1e5) %>%
+# 	.[, word_ix := cumsum(fifelse(
+# 			is_seq_start == 1 |
+# 			str_detect(token, "\\s|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]|<linebreak>") |
+# 				str_detect(shift(token, 1), "\\s$|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]$|<linebreak>$"),
+# 			1, 0))
+# 		] %>%
+# 	.[
+# 		,
+# 		token_word := slider::slide_chr(tokf, \(x) paste0(x, collapse = ''), .before = 4, .after = 4),
+# 		by = word_ix
+# 		] %>%
+# 	tail(., 20) %>%
+# 	print()
+# 
+# 
+# sample_df_0 =
+# 	sample_df_raw %>%
+# 	.[order(seq_id, sample_ix)] %>%
+# 	.[, 
+# 		tokf := ifelse(is_seq_start == 1, paste0('<bos>', token), token),
+# 		by = seq_id
+# 	] %>%
+# 	.[, 
+# 		pre := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = 10, .after = -1), 
+# 		by = seq_id
+# 	] %>%
+# 	.[,
+# 		post := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = -1, .after = 6), 
+# 		by = seq_id
+# 	] %>%
+# 	.[, token_context := ifelse(
+# 		is_seq_start == 1,
+# 		paste0(pre, '<bos>[[', str_sub(tokf, 6), ']]', post),
+# 		paste0(pre, '[[', tokf, ']]', post)
+# 	)]
+# 	
+
 ## Get Data ---------------------------------------------------------------
 local({
 	
-	languages = c('en', 'cn')
+	languages = c('en', 'cn', 'es')
 	data_dir = 'analyses/path-analysis/data'
 	
 	# Get raw token-level df, replace lang x batch_ix x sequence_ix x token_ix identifier with sample_ix
@@ -79,6 +119,7 @@ local({
 			tokf := ifelse(is_seq_start == 1, paste0('<bos>', token), token),
 			by = seq_id
 			] %>%
+		# Get the context around the token
 		.[, 
 			pre := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = 8, .after = -1), 
 			by = seq_id
@@ -92,9 +133,23 @@ local({
 			paste0(pre, '<bos>[[', str_sub(tokf, 6), ']]', post),
 			paste0(pre, '[[', tokf, ']]', post)
 			)] %>%
-		.[, c('pre', 'post', 'is_seq_start', 'tokf') := NULL] %>%
+		# Get the word that each token belongs to
+		# New word boundary created whenever (new seq start) or (token has a space/linebreak/etc) 
+		# or (prev token ENDS with a a space/linebreak/etc)
+		.[, word_ix := cumsum(fifelse(
+			is_seq_start == 1 |
+				str_detect(token, "\\s|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]|<linebreak>") |
+				str_detect(shift(token, 1), "\\s$|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]$|<linebreak>$"),
+			1, 0))
+		] %>%
+		.[
+			,
+			token_word := slider::slide_chr(tokf, \(x) paste0(x, collapse = ''), .before = 4, .after = 4),
+			by = word_ix
+		] %>%
+		.[, c('pre', 'post', 'is_seq_start', 'tokf', 'word_ix') := NULL] %>%
 		merge(
-			., 
+			.,
 			routes_df %>% .[, list(route = list(expert)), by = list(sample_ix)],
 			by = c('sample_ix'),
 			all = F
@@ -133,7 +188,7 @@ local({
 		geom_col(aes(x = expert, y = n), position = 'identity', fill = 'skyblue') +
 		facet_grid(rows = vars(layer_ix), cols = vars(lang)) +
 		labs(title = 'Frequency of experts as topk = 1 relative to other topks', x = 'Expert ID', y = 'Routing Counts')
-	
+
 })
 
 ## Check Coverage ---------------------------------------------------
@@ -369,11 +424,12 @@ local({
 			slice_sample(., n = 20) %>%
 			summarize(
 				.,
-				token_samples = paste0(token, collapse = ', '),
-				token_samples_with_context = paste0(token_context, collapse = '\n'),
+				token_samples = list(token),
+				context_samples = list(token_context),
+				word_samples = list(token_word),
 				primary_lang = count(cur_data(), lang) %>% filter(., n == max(n)) %>% pull(lang) %>% sample(., 1),
-				lang_samples = paste0(lang, collapse = ', '),
-				output_samples = paste0(output_id, collapse = ', ')
+				lang_samples = list(lang),
+				output_samples = list(output_id)
 			)
 		
 		valid_paths_final = inner_join(valid_paths, valid_path_sample_stats, by = 'subset_route')
@@ -396,7 +452,8 @@ local({
 				n_samples,
 				n_distinct_input_ids,
 				token_samples,
-				token_samples_with_context,
+				context_samples,
+				word_samples,
 				primary_lang,
 				lang_samples,
 				output_samples
@@ -429,10 +486,27 @@ local({
 	paths_5_ml = get_path_clusters(sample_df, c(16:20), F, 10)
 	
 	
+	csv_export =
+		paths_1_ml %>%
+		mutate(
+			.,
+			token_samples = map_chr(token_samples, \(x) paste0(x, collapse = ',')),
+			context_samples = map_chr(token_samples_with_context, \(x) paste0(x, collapse = '\n')),
+			word_samples = map_chr(word_samples, \(x) paste0(x, collapse = ',')),
+			lang_samples = map_chr(lang_samples, \(x) paste0(x, collapse = ',')),
+			output_samples = map_chr(output_samples, \(x) paste0(, colalpse = ','))
+			)
+	
 	paths_1_ml %>%
-		sample_n(., 10000) %>%
-		select(., -subset_layers, -subset_route) %>%
-		write_csv(., str_glue('{model_prefix}-c4-paths-2-to-6.csv'))
+		mutate(
+			.,
+			token_samples = map_chr(token_samples, \(x) jsonlite::toJSON(x, auto_unbox = T)),
+			token_samples_with_context = map_chr(token_samples_with_context, \(x) jsonlite::toJSON(x, auto_unbox = T)),
+			lang_samples = map_chr(lang_samples, \(x) jsonlite::toJSON(x, auto_unbox = T))
+		)
+		
+		# select(., -subset_layers, -subset_route) %>%
+		# write_csv(., str_glue('{model_prefix}-c4-paths-2-to-6.csv'))
 })
 
 
