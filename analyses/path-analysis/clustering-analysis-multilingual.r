@@ -37,6 +37,7 @@ local({
 		.[, seq_id := .GRP, by = list(lang, batch_ix, sequence_ix)] %>%
 		.[, is_seq_start := as.integer(token_ix == min(token_ix)), by = seq_id] %>%
 		.[, sample_ix := .GRP, by = list(lang, batch_ix, sequence_ix, token_ix)] %>%
+		.[, token := str_replace_all(token, '\n', '<linebreak>')] %>%
 		arrange(., sample_ix) %>%
 		select(
 			., 
@@ -424,17 +425,14 @@ local({
 	paths_4_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(10:16), F, 10)
 	paths_4_ml = get_path_clusters(sample_df, c(10:16), F, 10)
 	
-	paths %>%
+	paths_5_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(16:20), F, 10)
+	paths_5_ml = get_path_clusters(sample_df, c(16:20), F, 10)
+	
+	
+	paths_1_ml %>%
 		sample_n(., 10000) %>%
-		transmute(
-			., 
-			routing_path = path_str,
-			n_samples,
-			n_distinct_token_ids,
-			token_samples,
-			token_samples_with_context
-			) %>%
-		write_csv(., str_glue('{model_prefix}-paths-2-to-6.csv'))
+		select(., -subset_layers, -subset_route) %>%
+		write_csv(., str_glue('{model_prefix}-c4-paths-2-to-6.csv'))
 })
 
 
