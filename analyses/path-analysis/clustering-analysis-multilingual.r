@@ -7,67 +7,30 @@ library(uwot, include.only = 'umap')
 library(dbscan, include.only = c('hdbscan', 'dbscan'))
 library(rnndescent)
 
+dotenv::load_dot_env('.env')
+db_helpers = local({source('./r_helpers/db-helpers.r', local = T); environment()})
+
 model_prefix = 'qwen1.5moe'
 
 ## Helpers ---------------------------------------------------------------
 big_format = scales::number_format(accuracy = 1e-2, scale_cut = scales::cut_short_scale())
 get_entropy = function(counts) {
-	if(sum(counts) == 0) return(0) 
+	if(sum(counts) == 0) return(0)
 	p = counts / sum(counts)
 	-sum(p * log2(p))
 }
 
-# # Assumes that if token has a space in it, the first token must have a space
-# sample_df_0 %>%
-# 	head(., 1e5) %>%
-# 	.[, word_ix := cumsum(fifelse(
-# 			is_seq_start == 1 |
-# 			str_detect(token, "\\s|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]|<linebreak>") |
-# 				str_detect(shift(token, 1), "\\s$|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]$|<linebreak>$"),
-# 			1, 0))
-# 		] %>%
-# 	.[
-# 		,
-# 		token_word := slider::slide_chr(tokf, \(x) paste0(x, collapse = ''), .before = 4, .after = 4),
-# 		by = word_ix
-# 		] %>%
-# 	tail(., 20) %>%
-# 	print()
-# 
-# 
-# sample_df_0 =
-# 	sample_df_raw %>%
-# 	.[order(seq_id, sample_ix)] %>%
-# 	.[, 
-# 		tokf := ifelse(is_seq_start == 1, paste0('<bos>', token), token),
-# 		by = seq_id
-# 	] %>%
-# 	.[, 
-# 		pre := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = 10, .after = -1), 
-# 		by = seq_id
-# 	] %>%
-# 	.[,
-# 		post := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = -1, .after = 6), 
-# 		by = seq_id
-# 	] %>%
-# 	.[, token_context := ifelse(
-# 		is_seq_start == 1,
-# 		paste0(pre, '<bos>[[', str_sub(tokf, 6), ']]', post),
-# 		paste0(pre, '[[', tokf, ']]', post)
-# 	)]
-# 	
-
 ## Get Data ---------------------------------------------------------------
 local({
-	
+
 	languages = c('en', 'cn', 'es')
 	data_dir = 'analyses/path-analysis/data'
-	
+
 	# Get raw token-level df, replace lang x batch_ix x sequence_ix x token_ix identifier with sample_ix
 	sample_df_raw =
 		map(languages, \(l)
 				fread(
-					str_glue('{data_dir}/{model_prefix}-{l}-samples.csv'), 
+					str_glue('{data_dir}/{model_prefix}-{l}-samples.csv'),
 					colClasses = list(integer = c(1, 2, 3, 4, 7), character = 6, double = 5),
 					strip.white = F
 					) %>%
@@ -80,15 +43,15 @@ local({
 		.[, token := str_replace_all(token, '\n', '<linebreak>')] %>%
 		arrange(., sample_ix) %>%
 		select(
-			., 
+			.,
 			sample_ix, seq_id, is_seq_start,
 			lang, batch_ix, sequence_ix, token_ix,
 			is_seq_start, token_id, token, output_id, output_prob
 			)
-	
+
 	# Get raw sample x layer level dataframe
 	routes_df =
-		map(languages, \(l) 
+		map(languages, \(l)
 				fread(
 					str_glue('{data_dir}/{model_prefix}-{l}-routes-top1.csv'),
 					colClasses = list(integer = c(1, 2, 3, 4, 5, 7), double = 6)
@@ -96,36 +59,36 @@ local({
 					.[, lang := l] %>%
 					.[, layer_ix := layer_ix + 1] %>%
 					.[, weight := NULL] %>%
-					.[, topk_ix := NULL] 
+					.[, topk_ix := NULL]
 		) %>%
 		rbindlist() %>%
 		merge(
-			., 
+			.,
 			select(sample_df_raw, sample_ix, lang, batch_ix, sequence_ix, token_ix),
 			by = c('lang', 'batch_ix', 'sequence_ix', 'token_ix'),
 			all = F
 			) %>%
 		select(., sample_ix, layer_ix, expert) %>%
 		arrange(., sample_ix, layer_ix)
-	
+
 	n_layers = length(unique(routes_df$layer_ix))
 	n_experts = length(unique(routes_df$expert))
-	
+
 	# Now create the string context around each sample, and additionally collapse the routes into a list-col
 	sample_df =
 		sample_df_raw %>%
 		.[order(seq_id, sample_ix)] %>%
-		.[, 
+		.[,
 			tokf := ifelse(is_seq_start == 1, paste0('<bos>', token), token),
 			by = seq_id
 			] %>%
 		# Get the context around the token
-		.[, 
-			pre := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = 8, .after = -1), 
+		.[,
+			pre := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = 8, .after = -1),
 			by = seq_id
 			] %>%
 		.[,
-			post := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = -1, .after = 4), 
+			post := slide_index_chr(tokf, sample_ix, \(x) paste0(x, collapse = ''), .before = -1, .after = 4),
 			by = seq_id
 			] %>%
 		.[, token_context := ifelse(
@@ -134,12 +97,13 @@ local({
 			paste0(pre, '[[', tokf, ']]', post)
 			)] %>%
 		# Get the word that each token belongs to
-		# New word boundary created whenever (new seq start) or (token has a space/linebreak/etc) 
+		# New word boundary created whenever (new seq start) or (token has a space/linebreak/etc)
 		# or (prev token ENDS with a a space/linebreak/etc)
 		.[, word_ix := cumsum(fifelse(
 			is_seq_start == 1 |
-				str_detect(token, "\\s|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]|<linebreak>") |
-				str_detect(shift(token, 1), "\\s$|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]$|<linebreak>$"),
+			str_detect(token, "\\s|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]|<linebreak>") |
+			is.na(shift(token, 1)) |
+			str_detect(shift(token, 1), "\\s$|[.,;:!?\\-\\(\\)\\[\\]\\{\\}/]$|<linebreak>$"),
 			1, 0))
 		] %>%
 		.[
@@ -155,7 +119,7 @@ local({
 			all = F
 			) %>%
 		.[, c('batch_ix', 'sequence_ix', 'token_ix') := NULL]
-	
+
 	n_experts <<- n_experts
 	n_layers <<- n_layers
 	routes_df <<- as_tibble(routes_df)
@@ -166,7 +130,7 @@ local({
 
 ## Graph Expert Distribution ---------------------------------------------
 local({
-	
+
 	routes_df %>%
 		head(., 1e7) %>%
 		count(expert, layer_ix) %>%
@@ -175,7 +139,7 @@ local({
 		geom_col(aes(x = expert, y = n), position = 'identity', fill = 'skyblue') +
 		facet_grid(rows = vars(layer_ix)) +
 		labs(title = 'Frequency of experts as topk = 1 relative to other topks', x = 'Expert ID', y = 'Routing Counts')
-	
+
 	# By language
 	bind_rows(
 		head(filter(sample_df, lang == 'en'), 5e5),
@@ -193,11 +157,11 @@ local({
 
 ## Check Coverage ---------------------------------------------------
 local({
-	
+
 	#' Print how many distinct routes are needed to cover the sample, conditional on different path lengths
 	#'
 	#' @param sample_df A sample-level df column `route`, a list-col of routed expert ids
-	#' @param test_levels A nested list of vectors for all the levels you want to test 
+	#' @param test_levels A nested list of vectors for all the levels you want to test
 	#'
 	#' @examples \dontrun{
 	#'   # Print route coverage of layers 1:3, layers 1-3-5
@@ -209,15 +173,15 @@ local({
 	print_path_counts = function(sample_df, test_levels) {
 		print(str_glue('Sample tokens: {big_format(nrow(sample_df))}'))
 		walk(test_levels, function(test_levs) {
-			
-			test_combo = 
+
+			test_combo =
 				sample_df %>%
 				mutate(., route = map(route, \(x) x[test_levs])) %>%
 				group_by(route) %>%
 				summarize(n_tokens = n(), .groups = 'drop') %>%
 				arrange(desc(n_tokens)) %>%
 				mutate(., cumprop_toks = cumsum(n_tokens)/sum(n_tokens), cumprop_rtes = (1:n())/nrow(.))
-			
+
 			print(str_glue(
 				'\nTest levels: {paste0(test_levs, collapse = ", ")}',
 				'\n - Distinct routes: {big_format(nrow(test_combo))}',
@@ -226,7 +190,7 @@ local({
 			))
 		})
 	}
-	
+
 	# Test combinations of layers that return a reasonable number of paths
 	print_path_counts(
 		sample_df %>% filter(., lang == 'en'),
@@ -235,11 +199,11 @@ local({
 			c(1:4), c(1, 3, 5, 7), c(1:5),
 			c(2:6), c(4:8),
 			c(1:7), c(2:8), c(3:9), c(1, 3, 5, 7, 9, 11, 13),
-			c(1:4, 8, 10, 12, 14),
+			c(1:4, 8, 10, 12, 14)
 			)
 		)
-	
-	
+
+
 	#' Print expert continuity by layer
 	#'
 	#' @param sample_df A sample-level df column `route`, a list-col of routed expert ids
@@ -256,28 +220,28 @@ local({
 			group_by(., layer_ix) %>%
 			summarize(., ec = sum(is_cont)/n(), .groups = 'drop')
 	}
-	
+
 	bind_rows(
 		get_ec_by_layer(sample_df %>% filter(., lang == 'en')	%>% sample_n(., 10000)) %>% mutate(., lang = 'en'),
 		get_ec_by_layer(sample_df %>% filter(., lang == 'cn')	%>% sample_n(., 10000)) %>% mutate(., lang = 'cn')
 		) %>%
 		ggplot() +
 		geom_line(aes(x = layer_ix, y = ec, color = lang, group = lang))
-	
+
 	#' Get coverage stats by layer combination
-	#' 
+	#'
 	#' @param sample_df A sample-level df column `route`, a list-col of routed expert ids
 	#' @param n_layers The number of layers routed to
 	#' @param n_experts The number of experts routed to
 	#' @param .verbose If T, prints progress
-	#' 
+	#'
 	#' @returns A dataframe at a (start_layer, end_layer) level with entropy metrics
 	get_entropy_by_layer = function(sample_df, n_layers, n_experts, .verbose = F) {
-		
+
 		possible_layer_combs =
 			expand_grid(start_layer = 1:n_layers, end_layer = 1:n_layers) %>%
 			filter(end_layer > start_layer)
-		
+
 		route_level_df =
 			sample_df %>%
 			select(., sample_ix, route) %>%
@@ -288,25 +252,25 @@ local({
 			rowwise() %>%
 			mutate(
 				metrics = {
-					
+
 					if (.verbose) print(paste0(start_layer, '-', end_layer))
 					path_length = end_layer - start_layer + 1
-				
-					# Convert to sample level	
+
+					# Convert to sample level
 					subroutes_df =
 						route_level_df %>%
 						filter(layer_ix >= start_layer, layer_ix <= end_layer) %>%
 						group_by(sample_ix) %>%
 						arrange(layer_ix, .by_group = T) %>%
-						summarize(route = list(expert), .groups = "drop") 
-					
+						summarize(route = list(expert), .groups = "drop")
+
 					subroute_counts =
 						subroutes_df %>%
 						group_by(route) %>%
 						summarize(n_tokens = n(), .groups = "drop") %>%
 						arrange(desc(n_tokens)) %>%
 						mutate(., cumprop_tokens = cumsum(n_tokens)/sum(n_tokens), cumprop_routes = (1:n())/nrow(.))
-					
+
 					obs_entropy = get_entropy(subroute_counts$n_tokens)
 					max_entropy = path_length * log2(n_experts) # log2 = % of bits entropy
 					norm_entropy = obs_entropy/max_entropy
@@ -326,12 +290,12 @@ local({
 			) %>%
 			ungroup() %>%
 			unnest(cols = metrics)
-		
+
 		return(layer_combos)
 	}
-	
+
 	entropy_df = get_entropy_by_layer(filter(sample_df, sample_ix <= 1e4), n_layers, n_experts, F)
-	
+
 	entropy_df %>%
 		ggplot() +
 		geom_tile(aes(x = start_layer, y = path_length, fill = t10_coverage)) +
@@ -344,7 +308,7 @@ local({
 		theme_minimal() +
 		labs(title = 'Token coverage from top 10% of paths', x = 'Starting Layer', y = 'Path Length') +
 		theme(legend.position = 'none')
-	
+
 	entropy_df %>%
 		ggplot() +
 		geom_tile(aes(x = start_layer, y = path_length, fill = norm_entropy)) +
@@ -357,8 +321,8 @@ local({
 		theme_minimal() +
 		labs(title = 'Normalized entropy (fraction of bits of capacity used)', x = 'Starting Layer', y = 'Path Length') +
 		theme(legend.position = 'none')
-	
-	
+
+
 	# Test 2-layer path distributions
 	expert_1_2_map =
 		expand_grid(exp_1 = 0:(n_experts - 1), exp_2 = 0:(n_experts - 1)) %>%
@@ -373,7 +337,7 @@ local({
 			pivot_wider(., names_from = 'index', values_from = 'exp', names_prefix = 'exp_') %>%
 			inner_join(., expert_1_2_map, join_by(exp_1, exp_2)) %>%
 			mutate(., start_end_layers = paste0(l[[1]], '-', l[[2]]))
-	)) 
+	))
 
 	expert_1_2_df %>%
 		ggplot() +
@@ -381,8 +345,8 @@ local({
 		facet_grid(rows = vars(start_end_layers)) +
 		theme_minimal() +
 		labs(x = 'Expert cross-ID', y = 'Density', title = 'Expert two-layer routing probability')
-	
-	print_path_counts <<- print_path_counts 
+
+	print_path_counts <<- print_path_counts
 	get_entropy_by_layer <<- get_entropy_by_layer
 })
 
@@ -393,18 +357,22 @@ local({
 local({
 
 	#' Get basic path clusters by path size
-	#' 
-	#' @param sample_level_df A sample-level dataframe with columns `route` (a list-col of routes), `token`, 
+	#'
+	#' @param sample_level_df A sample-level dataframe with columns `route` (a list-col of routes), `token`,
 	#'  `token_context`, `lang`, `output_id`
 	#' @param grouping_layers A vector of integer indices for the layers to group columns by
 	#' @param .entropy Whether to return the Shannon entropy of tokens in each group; useful for analyzing
 	#'  token diversity
 	#' @param .min_n_per_cluster The minimum size of each cluster. Lower returns smaller clusters, and is
 	#'  more time costly.
-	#'  
+	#'
 	#' @returns A dataframe at a `path_str`/`subset_route` level, indicating a specific path.
-	get_path_clusters = function(sample_level_df, grouping_layers, .entropy = F, .min_n_per_cluster = 20) {	
-		
+	#'
+	#' @export
+	get_path_clusters = function(sample_level_df, grouping_layers, .entropy = F, .min_n_per_cluster = 20) {
+
+		t0 = Sys.time()
+
 		sample_level_df_segment =
 			sample_level_df %>%
 			mutate(., subset_route = map(route, \(x) x[grouping_layers]))
@@ -413,10 +381,10 @@ local({
 			sample_level_df_segment %>%
 			group_by(., subset_route) %>%
 			summarize(., n_samples = n(), n_distinct_input_ids = n_distinct(token_id))
-		
+
 		valid_paths = filter(paths, n_samples >= .min_n_per_cluster)
-		
-		# Get sample-level stats seperately 
+
+		# Get sample-level stats seperately
 		valid_path_sample_stats =
 			sample_level_df_segment %>%
 			filter(., subset_route %in% valid_paths$subset_route) %>%
@@ -424,15 +392,29 @@ local({
 			slice_sample(., n = 20) %>%
 			summarize(
 				.,
+				
 				token_samples = list(token),
 				context_samples = list(token_context),
 				word_samples = list(token_word),
-				primary_lang = count(cur_data(), lang) %>% filter(., n == max(n)) %>% pull(lang) %>% sample(., 1),
+				# primary_lang = count(cur_data(), lang) %>% filter(., n == max(n)) %>% pull(lang) %>% sample(., 1),
 				lang_samples = list(lang),
 				output_samples = list(output_id)
 			)
 		
-		valid_paths_final = inner_join(valid_paths, valid_path_sample_stats, by = 'subset_route')
+		lang_freqs = 
+			valid_path_sample_stats %>%
+			select(subset_route, lang_samples) %>%
+			unnest_longer(lang_samples, values_to = 'lang') %>% 
+			count(subset_route, lang) %>%
+			group_by(., subset_route) %>% 
+			filter(., n == max(n)) %>%
+			slice_sample(., n = 1) %>%
+			transmute(subset_route, primary_lang = lang)
+
+		valid_paths_final =
+			valid_paths %>%
+			inner_join(., valid_path_sample_stats, by = 'subset_route') %>%
+			inner_join(., lang_freqs, by = 'subset_route')
 
 		if (.entropy) {
 			entropy_df =
@@ -442,8 +424,9 @@ local({
 				group_by(subset_route) %>%
 				summarize(entropy = get_entropy(count), .groups = 'drop')
 		}
-		
-		valid_paths_final %>%
+
+		res =
+			valid_paths_final %>%
 			transmute(
 				.,
 				subset_layers = list(grouping_layers),
@@ -459,54 +442,74 @@ local({
 				output_samples
 			) %>%
 			{if (.entropy) inner_join(., entropy_df, join_by(subset_route)) else .}
+
+		print(Sys.time() - t0)
+		return(res)
 	}
-	
-	t0 = Sys.time()
+
+	#' Convert `path`-level df to CSV-friendly format
+	#'
+	#' @param paths_df A path-level df generated by `get_path_clusters`
+	#'
+	#' @export
+	format_paths_csv = function(paths_df) {
+		paths_df %>%
+			mutate(
+				across(c(context_samples), \(x) map_chr(x, \(y) paste0(y, collapse = '\n'))),
+				across(
+					c(token_samples, context_samples, word_samples, lang_samples, output_samples),
+					\(x) map_chr(x, \(y) paste0(y, collapse = ','))
+				)
+			) %>%
+			transmute(
+				path_str,
+				n_samples, n_distinct_input_ids,
+				token_samples, context_samples, word_samples, primary_lang, lang_samples, output_samples
+			)
+	}
+
+	#' Convert `path`-level df to SQL-friendly format
+	#'
+	#' @param paths_df A path-level df generated by `get_path_clusters`
+	#'
+	#' @export
+	format_paths_sql = function(paths_df) {
+		paths_df %>%
+			mutate(
+				across(
+					c(subset_route, token_samples, context_samples, word_samples, lang_samples, output_samples),
+					\(x) map_chr(x, \(y) jsonlite::toJSON(y, auto_unbox = T))
+				)
+			) %>%
+			transmute(
+				route = subset_route,
+				n_samples,
+				n_samples, n_distinct_input_ids,
+				token_samples, context_samples, word_samples, primary_lang, lang_samples, output_samples
+			)
+	}
+
+	paths_0_ml = get_path_clusters(sample_df %>% head(10), c(2:6), F, 10)
+
 	paths_1_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(2:6), F, 10)
-	print(Sys.time() - t0)
-	
-	t0 = Sys.time()
-	paths_1_cn = get_path_clusters(sample_df %>% filter(lang == 'cn'), c(2:6), F, 10)
-	print(Sys.time() - t0)
-	
-	t0 = Sys.time()
 	paths_1_ml = get_path_clusters(sample_df, c(2:6), F, 10)
-	print(Sys.time() - t0)
-	
+
 	paths_2_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(3:12), F, 10)
-	paths_2_ml = get_path_clusters(sample_df, c(3:12), F, 10)
-	
+	paths_2_ml = get_path_clusters(sample_df, c(3:10), F, 10)
+
 	paths_3_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(8:14), F, 10)
 	paths_3_ml = get_path_clusters(sample_df, c(8:14), F, 10)
-	
+
 	paths_4_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(10:16), F, 10)
 	paths_4_ml = get_path_clusters(sample_df, c(10:16), F, 10)
-	
+
 	paths_5_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(16:20), F, 10)
 	paths_5_ml = get_path_clusters(sample_df, c(16:20), F, 10)
-	
-	
-	csv_export =
-		paths_1_ml %>%
-		mutate(
-			.,
-			token_samples = map_chr(token_samples, \(x) paste0(x, collapse = ',')),
-			context_samples = map_chr(token_samples_with_context, \(x) paste0(x, collapse = '\n')),
-			word_samples = map_chr(word_samples, \(x) paste0(x, collapse = ',')),
-			lang_samples = map_chr(lang_samples, \(x) paste0(x, collapse = ',')),
-			output_samples = map_chr(output_samples, \(x) paste0(, colalpse = ','))
-			)
-	
-	paths_1_ml %>%
-		mutate(
-			.,
-			token_samples = map_chr(token_samples, \(x) jsonlite::toJSON(x, auto_unbox = T)),
-			token_samples_with_context = map_chr(token_samples_with_context, \(x) jsonlite::toJSON(x, auto_unbox = T)),
-			lang_samples = map_chr(lang_samples, \(x) jsonlite::toJSON(x, auto_unbox = T))
-		)
-		
-		# select(., -subset_layers, -subset_route) %>%
-		# write_csv(., str_glue('{model_prefix}-c4-paths-2-to-6.csv'))
+
+	paths_1_csv = paths_1_ml %>% format_paths_csv()
+	paths_1_sql = paths_1_ml %>% format_paths_sql()
+
+	paths_0_ml %>% format_paths_sql %>% head(10) %>% select(word_samples)
 })
 
 
@@ -514,24 +517,24 @@ local({
 local({
 
 	paths2 = get_path_clusters(sample_df_top1, c(2:4), .entropy = F)
-	
-	paths2 %>% 
+
+	paths2 %>%
 		filter(str_detect(path_str, '\\[l4\\] 1$')) %>%
 		filter(str_detect(path_str, '\\[l2\\] 13 ->')) %>%
 		View()
-	
+
 	paths3 = get_path_clusters(sample_df_top1, c(6:8), .entropy = F)
-	
-	paths3 %>% 
+
+	paths3 %>%
 		filter(str_detect(path_str, '\\[l4\\] 1$')) %>%
 		filter(str_detect(path_str, '\\[l2\\] 13 ->')) %>%
-		
+
 	paths3 %>%
-		filter(., str_detect(path_str, '\\[l8\\] 1')) %>% 
+		filter(., str_detect(path_str, '\\[l8\\] 1')) %>%
 		filter(., str_detect(path_str, '\\[l7\\] 1 ->'))
-		
-	
-	
+
+
+
 	sample_df_top1 %>%
 		filter(., token_id == 27) %>%
 		unnest_longer(route, indices_to = 'layer_id') %>%
@@ -571,7 +574,7 @@ uniq_paths =
 		.,
 		n_samples_for_tid_rte = n(),
 		.groups = 'drop'
-	) 
+	)
 
 most_common_per_group =
 	uniq_paths %>%
@@ -588,28 +591,28 @@ uniq_paths %>%
 
 ## Fixed Indices, Token Level ----------------------------------------------------
 local({
-	
+
 	# View most common toks
 	sample_df_top1 %>%
 		count(token, token_id) %>%
-		arrange(desc(n)) %>% 
+		arrange(desc(n)) %>%
 		view()
-	
+
 	test_token_df =
 		sample_df_top1 %>%
-		filter(., token == '-') 
+		filter(., token == '-')
 
 	print_path_counts(test_token_df, list(c(2:9), c(3:10), c(4, 6, 8, 10, 12, 14)))
-	
+
 	token_paths = get_path_clusters(test_token_df, c(4, 6, 8, 10, 12, 14), .entropy = F, .min_n_per_cluster = 10)
-	
+
 	token_paths %>% view()
 })
 
 
 ## Variable Layers ---------------------------------------------------------
 local({
-	
+
 	path_level_df =
 		routes_df %>%
 		filter(topk_ix == 1) %>%
@@ -623,7 +626,7 @@ local({
 		) %>%
 		filter(lengths(expert_path) == 6) %>%
 		transmute(., sample_ix, expert_path, layers)
-	
+
 	# Map samples
 	token_sample_map =
 		routes_df %>%
@@ -640,7 +643,7 @@ local({
 			next_tok = slide_index_chr(tok_fmt, sample_ix, \(x) paste0(x, collapse = ''), .before = -1, .after = 4),
 			token_context = paste0(prev_tok, '[[', tok_fmt, ']] ', next_tok)
 		)
-	
+
 	route_counts2 =
 		path_level_df %>%
 		left_join(., token_sample_map, by = 'sample_ix') %>%
@@ -655,40 +658,40 @@ local({
 		) %>%
 		mutate(frac_distinct = n_distinct_token_ids/n_samples) %>%
 		filter(., n_samples >= 10)
-	
+
 	route_counts2 %>%
 		filter(., n_samples > 10 & frac_distinct >= .25) %>%
 		View()
-	
+
 })
 
 
 ## Auto Clusters ---------------------------------------------
 local({
-	
+
 	grouping_layers = 1:8
 	cl_sample_size = 20000
-	
+
 	# View most common toks
 	sample_df_top1 %>%
 		count(token) %>%
-		arrange(desc(n)) %>% 
+		arrange(desc(n)) %>%
 		view()
-	
+
 	test_token_df =
 		sample_df_top1 %>%
 		filter(., token == ' bank') %>%
 		mutate(., route = map(route, \(x) x[grouping_layers]))
 
-	test_token_df_wide = 
+	test_token_df_wide =
 		test_token_df %>%
 		select(sample_ix, route) %>%
 		unnest_wider(., route, names_sep = '_', names_repair = \(x) str_replace_all(x, 'route_', 'layer_'))
-	
+
 	# Clustering sample
 	cluster_sample_df = sample_n(test_token_df_wide, min(nrow(test_token_df_wide), cl_sample_size))
 	cluster_sample_mat = as.matrix(select(cluster_sample_df, starts_with('layer_')))
-	
+
 	umap_emb = umap(
 		X = cluster_sample_mat,
 		metric = 'hamming',
@@ -700,17 +703,17 @@ local({
 		ret_model = T,
 		seed = 123
 	)
-	
+
 	# kNNdistplot(umap_emb$embedding, k = 4)
 	# dbscan_res = dbscan(umap_emb$embedding, eps = 1, minPts = 10)
 	hdbscan_res = hdbscan(umap_emb$embedding, minPts = 30)
-	
+
 	cluster_sample_mat_clustered =
 		cluster_sample_df %>%
 		transmute(
-			., 
-			sample_ix, 
-			cluster_id = hdbscan_res$cluster, 
+			.,
+			sample_ix,
+			cluster_id = hdbscan_res$cluster,
 			emb_1 = umap_emb$embedding[, 1],
 			emb_2 = umap_emb$embedding[, 2]
 			) %>%
@@ -719,7 +722,7 @@ local({
 			test_token_df,
 			join_by('sample_ix')
 		)
-	
+
 	# Token-level plot
 	cluster_sample_mat_clustered %>%
 		as_tibble() %>%
@@ -733,10 +736,10 @@ local({
 			x = 'Dimension 1',
 			y = 'Dimension 2'
 			)
-	
+
 	cluster_sample_mat_clustered %>%
 		mutate(
-			., 
+			.,
 			layers = map(layers, \(x) x[grouping_layers]),
 			path_str = map2_chr(layers, route, \(x, y) str_c(str_c('[l', x, '] ', y), collapse = ' -> '))
 			) %>%
@@ -750,16 +753,16 @@ local({
 			.groups = 'drop'
 		) %>%
 		View()
-	
-	
-	
+
+
+
 		transmute(
-			., 
+			.,
 			path_samples,
 			n_samples,
 			token_samples,
 			token_samples_with_context
 		) %>%
 		write_csv(., str_glue('{model_prefix}-of.csv'))
-	
+
 })
