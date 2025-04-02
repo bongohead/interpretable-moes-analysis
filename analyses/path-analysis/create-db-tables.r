@@ -13,10 +13,10 @@ pg = db_helpers$connect_pg()
 # Create Tables -----------------------------------------------------------
 local({
 	
-	# dbExecute(pg, "DROP TABLE IF EXISTS models")
-	# dbExecute(pg, "DROP TABLE IF EXISTS cluster_methods")
-	# dbExecute(pg, "DROP TABLE IF EXISTS paths")
-	
+	dbExecute(pg, "DROP TABLE IF EXISTS models")
+	dbExecute(pg, "DROP TABLE IF EXISTS model_cluster_methods")
+	dbExecute(pg, "DROP TABLE IF EXISTS paths")
+
 	dbExecute(pg, sql(
 		'CREATE TABLE IF NOT EXISTS models (
 			id SERIAL4 NOT NULL,
@@ -56,6 +56,8 @@ local({
 			context_samples JSONB NULL,
 			word_samples JSONB NULL,
 			primary_lang CHAR(2) NULL,
+			lang_samples JSONB NULL,
+			output_samples JSONB NULL,
 			created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 			CONSTRAINT paths_pk PRIMARY KEY (path_id),
 			CONSTRAINT paths_uk UNIQUE (model_cluster_method_id, route),

@@ -10,7 +10,7 @@ library(rnndescent)
 dotenv::load_dot_env('.env')
 db_helpers = local({source('./r_helpers/db-helpers.r', local = T); environment()})
 
-model_prefix = 'qwen1.5moe'
+model_prefix = 'olmoe'
 
 ## Helpers ---------------------------------------------------------------
 big_format = scales::number_format(accuracy = 1e-2, scale_cut = scales::cut_short_scale())
@@ -32,7 +32,8 @@ local({
 				fread(
 					str_glue('{data_dir}/{model_prefix}-{l}-samples.csv'),
 					colClasses = list(integer = c(1, 2, 3, 4, 7), character = 6, double = 5),
-					strip.white = F
+					strip.white = F,
+					na.strings = NULL
 					) %>%
 					.[, lang := l]
 				) %>%
@@ -54,7 +55,8 @@ local({
 		map(languages, \(l)
 				fread(
 					str_glue('{data_dir}/{model_prefix}-{l}-routes-top1.csv'),
-					colClasses = list(integer = c(1, 2, 3, 4, 5, 7), double = 6)
+					colClasses = list(integer = c(1, 2, 3, 4, 5, 7), double = 6),
+					na.strings = ''
 					) %>%
 					.[, lang := l] %>%
 					.[, layer_ix := layer_ix + 1] %>%
@@ -389,7 +391,7 @@ local({
 			sample_level_df_segment %>%
 			filter(., subset_route %in% valid_paths$subset_route) %>%
 			group_by(subset_route) %>%
-			slice_sample(., n = 20) %>%
+			slice_sample(., n = 25) %>%
 			summarize(
 				.,
 				
@@ -489,29 +491,63 @@ local({
 			)
 	}
 
-	paths_0_ml = get_path_clusters(sample_df %>% head(10), c(2:6), F, 10)
+	
+	paths_1_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(3:8), F, 10)
+	
+	paths_0_ml = get_path_clusters(sample_df %>% head(1000), c(3:8), F, 10)
+	paths_1_ml = get_path_clusters(sample_df, c(2:8), F, 10)
+	paths_2_ml = get_path_clusters(sample_df, c(5:9), F, 10)
+	# paths_3_ml = get_path_clusters(sample_df, c(10:16), F, 10)
+	# paths_4_ml = get_path_clusters(sample_df, c(16:20), F, 10)
 
-	paths_1_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(2:6), F, 10)
-	paths_1_ml = get_path_clusters(sample_df, c(2:6), F, 10)
+	paths_1_ml %>% select(word_samples) %>% View()
+	
+	# Change model_cluster_method_id as well as ml
+	paths_sql = paths_2_ml %>% format_paths_sql()
 
-	paths_2_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(3:12), F, 10)
-	paths_2_ml = get_path_clusters(sample_df, c(3:10), F, 10)
+	sum(paths_sql$n_samples)
+	nrow(sample_df)
+	sum(paths_sql$n_samples)/nrow(sample_df)
 
-	paths_3_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(8:14), F, 10)
-	paths_3_ml = get_path_clusters(sample_df, c(8:14), F, 10)
+	paths_sql %>%
+		transmute(
+			model_cluster_method_id = 6,
+			route,
+			token_samples,
+			context_samples,
+			word_samples,
+			primary_lang,
+			lang_samples,
+			output_samples
+		) %>%
+		db_helpers$write_df_to_sql(
+			pg,
+			.,
+			'paths',
+			'ON CONFLICT (model_cluster_method_id, route) DO UPDATE SET 
+			token_samples=EXCLUDED.token_samples,
+			context_samples=EXCLUDED.context_samples,
+			word_samples=EXCLUDED.word_samples,
+			primary_lang=EXCLUDED.primary_lang,
+			lang_samples=EXCLUDED.lang_samples,
+			output_samples=EXCLUDED.output_samples',
+			1000,
+			T
+		)
 
-	paths_4_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(10:16), F, 10)
-	paths_4_ml = get_path_clusters(sample_df, c(10:16), F, 10)
-
-	paths_5_en = get_path_clusters(sample_df %>% filter(lang == 'en'), c(16:20), F, 10)
-	paths_5_ml = get_path_clusters(sample_df, c(16:20), F, 10)
-
-	paths_1_csv = paths_1_ml %>% format_paths_csv()
-	paths_1_sql = paths_1_ml %>% format_paths_sql()
-
-	paths_0_ml %>% format_paths_sql %>% head(10) %>% select(word_samples)
+	paths_5_ml %>%
+		format_paths_csv() %>%
+		sample_n(10000) %>%
+		write_csv(., 'qwen1.5moe-16-20.csv')
+	
+	test_z =
+		sample_df %>%
+		filter(str_detect(token_context, 'how dirty the nation')) 
+	
+	test_z %>% View()
+	
+	
 })
-
 
 ## Individual Expert Analysis ----------------------------------------------
 local({
