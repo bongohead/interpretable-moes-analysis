@@ -82,7 +82,7 @@ def convert_hidden_states_to_df(input_ids: torch.Tensor, attention_mask: torch.T
         - `token_ix`: Token index within that sample.
         - `layer_ix`: The layer index.
         - `token_id`: The input token ID at that `sequence_ix` x `token_ix`.
-        - `weight`: A JSON-formatted embeddings column, each of length D.
+        - `embed`: A JSON-formatted embeddings column, each of length D.
 
     Example:
         prompt = 'Hello'
@@ -120,7 +120,7 @@ def convert_hidden_states_to_df(input_ids: torch.Tensor, attention_mask: torch.T
                 "token_ix": int(token_indices[i]),
                 "token_id": int(flat_input_ids[valid_positions[i]]),
                 "layer_ix": layer_ix,
-                "embed": layer_embeddings[i] # json.dumps([round(x, 6) for x in layer_embeddings[i].tolist()])
+                "embed": json.dumps([round(x, 6) for x in layer_embeddings[i].tolist()])
             }
 
             data.append(row)
