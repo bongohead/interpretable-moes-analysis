@@ -7,18 +7,21 @@ import torch
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
 
 @torch.no_grad()
-def run_dsv2_return_topk(model, input_ids, attention_mask):
+def run_dsv2_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
     """
     Params:
         @model: A model of class `DeepseekV2ForCausalLM`.
         @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
+        @return_hidden_states: Boolean; whether to return hidden_states themselves.
 
     Returns:
         A dictionary with keys:
         - `logits`: The standard B x N x V LM output
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights
+        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
+        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
     """
     B, N = input_ids.shape[:2]
     position_ids = torch.arange(0, N, dtype=torch.long, device = model.device).unsqueeze(0)
@@ -29,6 +32,9 @@ def run_dsv2_return_topk(model, input_ids, attention_mask):
     hidden_state = inputs_embeds
     all_topk_experts = []
     all_topk_weights = []
+    all_pre_mlp_hidden_states = []
+    all_hidden_states = []
+
     for layer_ix, layer in enumerate(model.model.layers):
         # layer_outputs = layer(hidden_state, attention_mask = attention_mask, position_ids = position_ids,)
         residual = hidden_state
@@ -39,6 +45,10 @@ def run_dsv2_return_topk(model, input_ids, attention_mask):
         # Fully Connected
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
+        # Return hidden states only for MoE layers
+        if 'DeepseekV2MLP' not in str(type(layer.mlp)) and return_hidden_states:
+            all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
+
         ## MLP
         if 'DeepseekV2MLP' in str(type(layer.mlp)):
             hidden_state = layer.mlp(hidden_state)
@@ -92,14 +102,17 @@ def run_dsv2_return_topk(model, input_ids, attention_mask):
             all_topk_weights.append(topk_weight)
 
         hidden_state = residual + hidden_state
+        # Return hidden states only for MoE layers
+        if 'DeepseekV2MLP' not in str(type(layer.mlp)) and return_hidden_states:
+            all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state)
-    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights}
+    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights, 'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states, 'all_hidden_states': all_hidden_states}
 
 
 @torch.no_grad()
-def run_dsv2_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False):
+def run_dsv2_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
     """
     Params:
         @model: A model of class `DeepseekV2ForCausalLM`.
@@ -108,12 +121,15 @@ def run_dsv2_return_topk(model, input_ids, attention_mask, layers_to_ablate = []
         @layers_to_ablate: A list of layer indices (0-indexed) for which experts will be ablated.
         @topk_to_ablate: A list of topk indices (0-indexed) for which experts will be ablated and replaced by zeros.
         @renorm: Whether to renormalize the sum of expert weights after ablation, to scale the post-ablation expert weight sum to the original expert weight sum.
+        @return_hidden_states: Boolean; whether to return hidden_states themselves.
 
     Returns:
         A dictionary with keys:
         - `logits`: The standard B x N x V LM output
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs. Returns tthe pre-ablation topk experts.
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights. Returns the post-ablation weights.
+        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
+        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
     """
     B, N = input_ids.shape[:2]
     position_ids = torch.arange(0, N, dtype=torch.long, device = model.device).unsqueeze(0)
@@ -124,6 +140,9 @@ def run_dsv2_return_topk(model, input_ids, attention_mask, layers_to_ablate = []
     hidden_state = inputs_embeds
     all_topk_experts = []
     all_topk_weights = []
+    all_pre_mlp_hidden_states = []
+    all_hidden_states = []
+
     for layer_ix, layer in enumerate(model.model.layers):
         # layer_outputs = layer(hidden_state, attention_mask = attention_mask, position_ids = position_ids,)
         residual = hidden_state
@@ -134,6 +153,11 @@ def run_dsv2_return_topk(model, input_ids, attention_mask, layers_to_ablate = []
         # Fully Connected
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
+        # Return hidden states only for MoE layers
+        if 'DeepseekV2MLP' not in str(type(layer.mlp)) and return_hidden_states:
+            all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
+
+
         ## MLP
         if 'DeepseekV2MLP' in str(type(layer.mlp)):
             hidden_state = layer.mlp(hidden_state)
@@ -209,7 +233,11 @@ def run_dsv2_return_topk(model, input_ids, attention_mask, layers_to_ablate = []
             all_topk_weights.append(topk_weight)
 
         hidden_state = residual + hidden_state
+        # Return hidden states only for MoE layers
+        if 'DeepseekV2MLP' not in str(type(layer.mlp)) and return_hidden_states:
+            all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
+
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state)
-    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights}
+    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights, 'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states, 'all_hidden_states': all_hidden_states}

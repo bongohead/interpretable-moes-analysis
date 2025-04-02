@@ -6,18 +6,21 @@ Reversed engineered forward pass for Qwen
 import torch
 
 @torch.no_grad()
-def run_qwen2moe_return_topk(model, input_ids, attention_mask):
+def run_qwen2moe_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
     """
     Params:
         @model: A model of class `Qwen2MoeForCausalLM`.
         @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
+        @return_hidden_states: Boolean; whether to return hidden_states themselves.
 
     Returns:
         A dictionary with keys:
         - `logits`: The standard B x N x V LM output
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights
+        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
+        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
     """
     input_embeds = model.model.embed_tokens(input_ids)
     
@@ -30,6 +33,9 @@ def run_qwen2moe_return_topk(model, input_ids, attention_mask):
 
     all_topk_experts = []
     all_topk_weights = []
+    all_pre_mlp_hidden_states = []
+    all_hidden_states = []
+        
     for layer_ix, layer in enumerate(model.model.layers):
         # SA
         residual = hidden_state
@@ -38,6 +44,8 @@ def run_qwen2moe_return_topk(model, input_ids, attention_mask):
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
+        if return_hidden_states:
+            all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
         ####### Qwen2MoeSparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
         batch_size, sequence_length, hidden_dim = hidden_state.shape
@@ -71,16 +79,18 @@ def run_qwen2moe_return_topk(model, input_ids, attention_mask):
         hidden_state = final_hidden_states
         hidden_state = residual + hidden_state
 
+        if return_hidden_states:
+            all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
         all_topk_experts.append(selected_experts.detach().cpu())
         all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state)
-    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights}
+    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights, 'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states, 'all_hidden_states': all_hidden_states}
 
 
 @torch.no_grad()
-def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False):
+def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
     """
     Params:
         @model: A model of class `Qwen2MoeForCausalLM`.
@@ -89,12 +99,15 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
         @layers_to_ablate: A list of layer indices (0-indexed) for which experts will be ablated.
         @topk_to_ablate: A list of topk indices (0-indexed) for which experts will be ablated and replaced by zeros.
         @renorm: Whether to renormalize the sum of expert weights after ablation, to scale the post-ablation expert weight sum to the original expert weight sum.
+        @return_hidden_states: Boolean; whether to return hidden_states themselves.
 
     Returns:
         A dictionary with keys:
         - `logits`: The standard B x N x V LM output
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs. Returns tthe pre-ablation topk experts.
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights. Returns the post-ablation weights.
+        - `all_pre_mlp_hidden_states`: A list of length equal to the number of MoE layers, with each element a B x N tensor of pre-MLP hidden states
+        - `all_hidden_states`:  A list of length equal to the number of MoE layers, with each element a B x N tensor of post-layer hidden states
     """
     input_embeds = model.model.embed_tokens(input_ids)
     
@@ -107,6 +120,9 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
 
     all_topk_experts = []
     all_topk_weights = []
+    all_pre_mlp_hidden_states = []
+    all_hidden_states = []
+
     for layer_ix, layer in enumerate(model.model.layers):
         # SA
         residual = hidden_state
@@ -115,6 +131,8 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
+        if return_hidden_states:
+            all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
         ####### Qwen2MoeSparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
         batch_size, sequence_length, hidden_dim = hidden_state.shape
@@ -159,9 +177,11 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
         hidden_state = final_hidden_states
         hidden_state = residual + hidden_state
 
+        if return_hidden_states:
+            all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
         all_topk_experts.append(selected_experts.detach().cpu())
         all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state)
-    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights}
+    return {'logits': logits, 'all_topk_experts': all_topk_experts, 'all_topk_weights': all_topk_weights, 'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states, 'all_hidden_states': all_hidden_states}
