@@ -14,3 +14,4 @@ pip install tqdm
 pip install sqlalchemy
 pip install python-dotenv
 pip install datasets
+pip install scikit-learn
