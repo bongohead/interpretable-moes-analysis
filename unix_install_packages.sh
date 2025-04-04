@@ -15,6 +15,7 @@ pip install sqlalchemy
 pip install python-dotenv
 pip install datasets
 pip install scikit-learn
+pip install umap-learn
 # CUDA clustering https://docs.rapids.ai/install/
 pip install \
     --extra-index-url=https://pypi.nvidia.com \
