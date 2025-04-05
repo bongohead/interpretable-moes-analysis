@@ -1,6 +1,6 @@
-pip install torch==2.6.0
-pip install bitsandbytes==0.45.3
-pip install transformers==4.50.0
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+pip install bitsandbytes==0.45.4
+pip install transformers==4.50.3
 pip install triton==3.2.0
 pip install flash-attn==2.7.4.post1 --no-build-isolation
 pip install jupyter lab
