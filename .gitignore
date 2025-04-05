@@ -5,6 +5,7 @@
 *.env
 *.html
 *.pt
+*.pkl
 
 # Python
 .venv
