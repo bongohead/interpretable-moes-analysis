@@ -20,7 +20,7 @@ def check_memory():
         print()
 
 
-def clear_all_cuda_memory():
+def clear_all_cuda_memory(verbose = True):
     """
     Clear all CUDA memory
     """
@@ -40,8 +40,8 @@ def clear_all_cuda_memory():
     # Optionally, reset the CUDA context (commented out as it's more drastic and may not always be necessary)
     # for device_id in range(torch.cuda.device_count()):
     #     torch.cuda.reset()
-        
-    print("All CUDA memory cleared on all devices.")
+    if verbose:
+        print("All CUDA memory cleared on all devices.")
 
 
 def profile_memory(func, warmup = 3, runs = 10, *args, **kwargs):
