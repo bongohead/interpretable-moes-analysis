@@ -25,5 +25,5 @@ apt install -y python3.12-venv
 python -m ensurepip --upgrade
 
 # Install packages
+echo "/workspace/interpretable-moes-analysis" > $(python -c "import site; print(site.getsitepackages()[0])")/add_path_analysis.pth
 sh unix_install_packages.sh
-sh unix_setup_paths.sh
