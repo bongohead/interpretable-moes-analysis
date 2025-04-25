@@ -86,6 +86,7 @@ def combine_plots(plots, title = None, height = 400, width = None, cols = 2):
         'width': width,
         'title_text': title,
         'showlegend': True,
+        'template': 'simple_white',
         # Add spacing between legend groups visually
         'legend_tracegroupgap': 20 # Adjust pixel gap as needed
     }
