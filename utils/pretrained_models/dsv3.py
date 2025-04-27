@@ -6,6 +6,28 @@ Reversed engineered forward pass for Qwen
 import torch
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
 
+def _sort_gate_tensors(ids: torch.Tensor, weights: torch.Tensor, expert_outputs: torch.Tensor | None = None):
+    """
+    Sort the `topk` axis descending by `weights`, and apply the same permutation to expert IDs (and optional raw expert outputs). 
+    For Deepseek-based architectures, these need to be sorted after the forward pass, since the MoE MUST be run with sorted = False.
+
+    Params:
+        @ids: BN x k tensor of expert IDs
+        @weights: BN x k tensor of gate probs
+        @outputs BN x k x D tensor of raw expert outputs (optional)
+
+    Returns:
+        ids_sorted, weights_sorted, outputs_sorted (None if outputs is None)
+    """
+    weights_sorted, order = torch.sort(weights, dim = 1, descending = True)
+    ids_sorted = torch.take_along_dim(ids, order, dim = 1)
+    if expert_outputs is None:
+        return ids_sorted, weights_sorted, None
+    expert_outputs_sorted = torch.take_along_dim(
+        expert_outputs, order.unsqueeze(-1), dim = 1
+    )
+    return ids_sorted, weights_sorted, expert_outputs_sorted
+
 @torch.no_grad()
 def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
     """
@@ -54,7 +76,6 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         if 'DeepseekV3MLP' not in str(type(layer.mlp)) and return_hidden_states:
             all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
-
         ## MLP
         if 'DeepseekV3MLP' in str(type(layer.mlp)):
             hidden_state = layer.mlp(hidden_state)
@@ -74,13 +95,13 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
             group_mask.scatter_(1, group_idx, 1)  # [n, n_group]
             score_mask = (group_mask.unsqueeze(-1).expand(bsz * seq_len, layer.mlp.gate.n_group, layer.mlp.gate.n_routed_experts // layer.mlp.gate.n_group).reshape(bsz * seq_len, -1))  # [n, e]
             tmp_scores = scores_for_choice.masked_fill(~score_mask.bool(), 0.0)  # [n, e]
-            _, topk_idx = torch.topk(tmp_scores, k=layer.mlp.gate.top_k, dim=-1, sorted=True)
+            _, topk_idx = torch.topk(tmp_scores, k=layer.mlp.gate.top_k, dim=-1, sorted=False)
             topk_weight = scores.gather(1, topk_idx)
             if layer.mlp.gate.top_k > 1 and layer.mlp.gate.norm_topk_prob:
                 denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
                 topk_weight = topk_weight / denominator
-            else:
-                topk_weight = topk_weight * layer.mlp.gate.routed_scaling_factor
+
+            topk_weight = topk_weight * layer.mlp.gate.routed_scaling_factor
             ### End MoeGate 
             hidden_state = hidden_state.view(-1, hidden_state.shape[-1])
             ### Start moe_infer - replaces layer.mlp.moe_infer(hidden_state, topk_idx, topk_weight).view(*orig_shape)
@@ -122,12 +143,17 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         hidden_state = residual + hidden_state
 
         if 'DeepseekV3MLP' not in str(type(layer.mlp)):
-            all_topk_experts.append(topk_ids.detach().cpu())
-            all_topk_weights.append(topk_weight.detach().cpu().to(torch.float32))
+            topk_ids, topk_weight, layer_expert_outputs = _sort_gate_tensors(
+                topk_ids.detach(),
+                topk_weight.detach(),
+                layer_expert_outputs.detach() if return_hidden_states else None
+            )
+            all_topk_experts.append(topk_ids.cpu())
+            all_topk_weights.append(topk_weight.cpu().to(torch.float32))
         
             if return_hidden_states:
                 all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
-                all_expert_outputs.append(layer_expert_outputs.detach().cpu())
+                all_expert_outputs.append(layer_expert_outputs.cpu())
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state).float()
@@ -142,7 +168,7 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
     }
 
 @torch.no_grad()
-def run_dsv3_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
+def run_dsv3_with_ablation_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
     """
     Params:
         @model: A model of class `DeepseekV3ForCausalLM`.
@@ -212,13 +238,13 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, layers_to_ablate = []
             group_mask.scatter_(1, group_idx, 1)  # [n, n_group]
             score_mask = (group_mask.unsqueeze(-1).expand(bsz * seq_len, layer.mlp.gate.n_group, layer.mlp.gate.n_routed_experts // layer.mlp.gate.n_group).reshape(bsz * seq_len, -1))  # [n, e]
             tmp_scores = scores_for_choice.masked_fill(~score_mask.bool(), 0.0)  # [n, e]
-            _, topk_idx = torch.topk(tmp_scores, k=layer.mlp.gate.top_k, dim=-1, sorted=True)
+            _, topk_idx = torch.topk(tmp_scores, k=layer.mlp.gate.top_k, dim=-1, sorted=False)
             topk_weight = scores.gather(1, topk_idx)
             if layer.mlp.gate.top_k > 1 and layer.mlp.gate.norm_topk_prob:
                 denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
                 topk_weight = topk_weight / denominator
-            else:
-                topk_weight = topk_weight * layer.mlp.gate.routed_scaling_factor
+
+            topk_weight = topk_weight * layer.mlp.gate.routed_scaling_factor
             ### End MoeGate 
             ######################## ABLATION
             # shape: topk_weight is [B*N, top_k]
@@ -282,12 +308,17 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, layers_to_ablate = []
         hidden_state = residual + hidden_state
 
         if 'DeepseekV3MLP' not in str(type(layer.mlp)):
-            all_topk_experts.append(topk_ids.detach().cpu())
-            all_topk_weights.append(topk_weight.detach().cpu().to(torch.float32))
+            topk_ids, topk_weight, layer_expert_outputs = _sort_gate_tensors(
+                topk_ids.detach(),
+                topk_weight.detach(),
+                layer_expert_outputs.detach() if return_hidden_states else None
+            )
+            all_topk_experts.append(topk_ids.cpu())
+            all_topk_weights.append(topk_weight.cpu().to(torch.float32))
         
             if return_hidden_states:
                 all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
-                all_expert_outputs.append(layer_expert_outputs.detach().cpu())
+                all_expert_outputs.append(layer_expert_outputs.cpu())
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state).float()

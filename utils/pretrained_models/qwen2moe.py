@@ -5,6 +5,30 @@ Reversed engineered forward pass for Qwen
 """
 import torch
 
+def _sort_gate_tensors(ids: torch.Tensor, weights: torch.Tensor, expert_outputs: torch.Tensor | None = None):
+    """
+    Sort the `topk` axis descending by `weights`, and apply the same permutation to expert IDs (and optional raw expert outputs). 
+    - For Deepseek-based architectures, all functions that return top-k or activations must sort these, since the MoE MUST be run with sorted = False.
+    - For OlMoE/Qwen, MoEs can be run with sorted = True. However, it may be useful to call this on code that involves ablation to re-sort the IDs,
+      weights, and expert outputs according to the new topk order.
+ 
+    Params:
+        @ids: BN x k tensor of expert IDs
+        @weights: BN x k tensor of gate probs
+        @outputs BN x k x D tensor of raw expert outputs (optional)
+
+    Returns:
+        ids_sorted, weights_sorted, outputs_sorted (None if outputs is None)
+    """
+    weights_sorted, order = torch.sort(weights, dim = 1, descending = True)
+    ids_sorted = torch.take_along_dim(ids, order, dim = 1)
+    if expert_outputs is None:
+        return ids_sorted, weights_sorted, None
+    expert_outputs_sorted = torch.take_along_dim(
+        expert_outputs, order.unsqueeze(-1), dim = 1
+    )
+    return ids_sorted, weights_sorted, expert_outputs_sorted
+
 @torch.no_grad()
 def run_qwen2moe_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
     """
@@ -125,8 +149,8 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
         - `logits`: The standard B x N x V LM output
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs. Returns tthe pre-ablation topk experts.
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights. Returns the post-ablation weights.
-        - `all_pre_mlp_hidden_states`: A list of length equal to the number of MoE layers, with each element a B x N tensor of pre-MLP hidden states
-        - `all_hidden_states`:  A list of length equal to the number of MoE layers, with each element a B x N tensor of post-layer hidden states
+        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
+        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
     input_embeds = model.model.embed_tokens(input_ids)
@@ -206,12 +230,19 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
         hidden_state = final_hidden_states
         hidden_state = residual + hidden_state
 
-        all_topk_experts.append(selected_experts.detach().cpu())
-        all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
+        # Resort ids/weights/layer outputs post-ablation
+        selected_experts, routing_weights, layer_expert_outputs = _sort_gate_tensors(
+            selected_experts.detach(),
+            routing_weights.detach(),
+            layer_expert_outputs.detach() if return_hidden_states else None
+        )
+
+        all_topk_experts.append(selected_experts.cpu())
+        all_topk_weights.append(routing_weights.cpu().to(torch.float32))
 
         if return_hidden_states:
             all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
-            all_expert_outputs.append(layer_expert_outputs.detach().cpu())
+            all_expert_outputs.append(layer_expert_outputs.cpu())
 
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state)
