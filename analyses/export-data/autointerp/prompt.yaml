@@ -1,0 +1,405 @@
+
+- role: system
+- message: |-
+    You are a helpful labeling assistant. Respond **ONLY** with valid JSON.
+
+    Input: A list of SAMPLE_TEXTS. Each SAMPLE_TEXT will have exactly one KEY TOKEN written as [[token]].
+
+    Return: A **single JSON object** summarizing the KEY TOKEN usage in the entire batch.
+
+    Guidelines:
+    First, examine all the KEY TOKENS in the entire sample and identify whether there are any shared patterns in the KEY TOKENS. Your analysis must focus only on the KEY TOKEN delimited by [[ ]] within each SAMPLE_TEXT. Use the surrounding SAMPLE_TEXT solely to understand the context and meaning of that specific KEY TOKEN.
+    
+    Your returned object will include the following keys:
+    - `is_monosemantic`: (bool). Determine whether ≥90 % of KEY TOKEN occurrences share a single meaning given their contexts. Treat differences in surface form (e.g. "percent" vs "%") as the same meaning if they denote the same concept.
+
+    For the next set of keys, return `null` if `is_monosemantic` is False. Otherwise, follow the below instructions:
+    - `label`: (str) A short label, no more than 10 words, describing the most specific shared monosemantic meaning of all the KEY TOKENS.
+    - `short_label`: (str) A compressed version of the short label, no more than 5 words, in all uppercase seperated by underscores.
+    - `examples`: (null|list[str]) A list of up to 5 representative, canonical examples of the tokens.
+    - `multilingual`: (null|bool) True if the KEY TOKENS are from or used in SAMPLE TEXTS in 2+ languages.
+    - `all_identical`: (null|bool) True if all the KEY TOKENS are identical (including casing), ignoring contextual meaning.
+    - `all_nearly_identical`: (null|bool) True if all the KEY TOKENS are nearly identical (allowing for small differences in formatting/casing, but not across languages), ignoring contextual meaning.
+    - `all_synonomous_no_context`: (null|bool) True if all the KEY TOKENS are synonyms (including possibly across languages), ignoring contextual meaning.
+    - `all_synonymous_with_context`: (null|bool) True if all the KEY TOKENS are synonyms (including possibly across languages) when evaluated in the context of their SAMPLE_TEXTs.
+    - `shared_pos`: (null|bool) True if all the KEY TOKENS have a shared part-of-speech in their given context.
+    - `shared_pos_label`: (null|str) `null` if `shared_pos` is False, otherwise, a string from one of the following options: 
+      - NOUNS
+      - PRONOUNS_AND_ARTICLES
+      - VERBS
+      - ADJECTIVES_AND_ADVERBS
+      - PREPOSITIONS_AND_CONJUNCTIONS
+      - PUNCTUATION
+    - `semantic_domains`: (null|list[str]) Choose any semantic domains below that apply to the monosemantic meaning; return an empty list if none are applicable.
+      - FUNCTION_WORD: closed-class words that primarily serve syntactic roles rather than content (incl articles & conjunctions) | the, a, an, of, and, but, or
+      - PRONOUN: personal / possessive / demonstrative pronouns | he, they, it, your, their, this
+      - PREPOSITION: heads of prepositional phrases, including multi-word forms| in, on, at, before, because, due to, because of, since
+      - ADVERB: attitude / polarity / time-frequency adverbs | always, maybe, soon, quickly, already, not
+      - TIME_TERM_GENERIC: generic calendrical units | hour, am/pm, year, Tuesday
+      - TIME_TERM_RELATIVE: relative date words / phrases | today, tonight, tomorrow, yesterday, next, past, end (of)
+      - NUMBER: pure numerals (cardinals or ordinals) | 1, one, first, twenty-seven, 2015
+      - MEASUREMENT: numeric symbols & unit tokens | %, °C, kg, cm, x (as in 4 x 6), '(as in 4'), mph
+      - QUANTITY_ADJECTIVE: determiners or adjectives expressing amount | many, few, several, multiple, plenty, lots, much, more, less
+      - EVALUATION_ADJECTIVE: subjective quality words | great, excellent, beautiful, terrible, useful, best, worst, highest, lowest, maximum
+      - EMOTION: words that directly denote affective or emotional states (nouns, adjectives, or verbs) | love, happy, sad, angry, joy, fear, hope, worried, excited
+      - HUMAN_ROLE_IDENTITY: nouns or adjectives marking social role, status, nationality, identity | customer, farmer, teacher, Christian, Indian, British, female
+      - RELATIONSHIP_KIN_TERM: family / social roles | sister, friend, colleague
+      - DIRECTION_LOCATION: literal or figurative direction/location tokens | north, south, up, down, around, across, through, downtown
+      - LIGHT_VERB: high-freq verbs of motion / change | go, come, get, make, take, give, have, be, do
+      - PROPER_NAME_PERSON: given or family names | Jeremy, Sofia, Blake
+      - PROPER_NAME_PLACE: geographic names | Arizona, London, Texas
+      - PROPER_NAME_ORG_PRODUCT: org, brand, or product names | Disney, Microsoft, Toyota
+      - PUNCTUATION_MARK: punctuation symbols | ., :, ?, !, ( ), « », ;
+      - TECH_TERM: tech/hardware/software abbreviations & components  | application, module, API, URL, AI, SEO, ISO, CSV
+      - SPORT_RECREATION_TERM: sport & game nouns | match, goal, tournament, playoff
+      - MONEY_FINANCE_TERM: currency or finance words | cash, budget, profit, earnings
+      - MEDICAL_BIO_TERM: medical or biological terms | cancer, tumour, gene, platelet
+      - LEGAL_GOVERNANCE_TERM: Words related to law, government processes, rules, or regulations | restriction, rights, law, policy, govern, regulate
+      - MATH_SYMBOL_OR_FORMULA: math operators / formulas | +, ≤, ∑, x², sin
+      - PROGRAMMING_TOKEN: source-code keywords, identifiers, braces | if, for, {}, ->, ;, def
+      - COLOR_TERM: colour names or codes | red, cyan, #FF00FF
+
+    For example, suppose you receive the following input:
+    ```
+    [
+        'We "convert" about 90[%] of these reservations via',
+        'Securities Commission reported that only 21 per[ cent] of issuers have',
+        'has helped place more than 90 per[ cent] of its graduates in',
+        'and his state, however. Ninety[ percent] of schools in the',
+        'diverse and extraordinarily segregated. 75[%] of white Americans have',
+        'customers. At Evergreen, 80[%] of our IT automation',
+        'not killing machines; ninety-nine per[ cent] of their lives are',
+        'scopy biopsy specimens, 0±20[%] of 7 non',
+        'specific region? In April, 81[%] of government suppliers were',
+        'them. China bought about 60 per[ cent] of US soya',
+        'But a Ph.D. with 50[%] of my actual income',
+        'age is another problem, and 95[%] of groundwater in the',
+        'it said that this meant 96[ percent] of Jamaicans seeking',
+        "Asian agreements account for over 62 per[ cent] of Australia's export",
+        'mini asphalt plant products. About 70[%] of these are asphalt'
+    ]
+    ```
+
+    Then your response should be:
+    ```
+    {
+        "is_monosemantic": True,
+        "label": "Percent sign used in different formats, always after a number",
+        "short_label": "PERCENT_SIGN_AFTER_NUMBER",
+        "examples": ["%", "percent"],
+        "multilingual": False,
+        "all_identical": False,
+        "all_nearly_identical": False,
+        "all_synonomous_no_context": True,
+        "all_synonymous_with_context": True,
+        "shared_pos": True,
+        "shared_pos_label": "NOUNS",
+        "semantic_domains": ["MEASUREMENT"]
+    }
+    ```
+- role: user
+  content: |-
+    [
+      "-year term. Five (5) candidates[[ were]] postulated for one",
+      "aka. Eighty special-needs children[[ have]] been given equipment to",
+      ". About 60,000 Russian children[[ have]] been adopted by U",
+      " quality of life. Over 150 patients[[ have]] taken part in the",
+      " Media Research, about 78 million Americans[[ have]] watched or listened to",
+      "3. Around 900 claims management companies[[ were]] operating in the personal",
+      ". Autodesk says over 80 AAA titles[[ have]] used the middleware. ",
+      "). As many as 20 stones stones[[ were]] used to capture the",
+      "ma Local Council, said nine aid trucks[[ had]] to leave the area",
+      "izes the urban region. The nine rooms[[ were]] represented by nine stars",
+      ". Two from the original twenty-six pieces[[ are]] still visible at La"
+    ]
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Auxiliary verbs marking passive/perfect aspect",
+      "short_label": "AUX_PASSIVE",
+      "examples": ["were", "have", "had"],
+      "multilingual": false,
+      "all_identical": false,
+      "all_nearly_identical": false,
+      "all_synonomous_no_context": false,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "VERBS",
+      "semantic_domains": ["LIGHT_VERB"]
+    }
+
+- role: user
+  content: |-
+    [
+      "Sausalito, California. The charming[[ b]]ayside city is",
+      "Collections is proud to host the first ever[[ Ce]]ccotti Collez",
+      ". The IUCN has listed these[[ c]]uckooshrike",
+      "roads, crystal-clear lakes and many[[ b]]iker-friendly hotels",
+      ", roaches, spiders, or other[[ p]]ests? Let us",
+      ". Located behind the cathedral, this[[ sw]]anky \"establ",
+      "Hominy Grill, a homey[[ e]]atery specializing",
+      "of cowboys at one of the oldest[[ r]]anches in Alberta.",
+      "be decreasing.\nThroughout its range this[[ c]]uckooshrike",
+      "built on one of Hobart's first[[ c]]emetries.",
+      "itious and simple example: our fictitious[[ t]]-shirt has 5",
+      "PU outer casing with a thick, soft[[ ne]]oprene inner (",
+      "bath adjacent to the bedroom plus a cozy[[ lo]]ft bedroom with full"
+    ]
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": false,
+      "label": null,
+      "short_label": null,
+      "examples": null,
+      "multilingual": null,
+      "all_identical": null,
+      "all_nearly_identical": null,
+      "all_synonomous_no_context": null,
+      "all_synonymous_with_context": null,
+      "shared_pos": null,
+      "shared_pos_label": null,
+      "semantic_domains": null
+    }
+
+- role: user
+  content: |-
+    [
+      " working to exceed our customers expectations. We[[ employ]] a staff of well",
+      " Annual Surf Contest, the organisation also[[ hosts]] three fun competitions throughout",
+      " the Maas Boulevard, which used to[[ host]] the finish of the",
+      " operating in Egypt for about 60 years and[[ produces]] chemicals used in construction",
+      " congregations in Baltimore. Zion Lutheran[[ offered]] a school with German",
+      " is a music enrichment program that he conduct[[s]] at Libraries and",
+      " walk around it. So cool that they[[ make]] lots of movie props",
+      " In the same visit, Pax Earth[[ conducted]] a Project Cycle Management",
+      " school to study Massage Therapy, eventually[[ graduating]] with Honours from",
+      " 40 new models. The company has recently[[ introduced]] new interior packages on"
+    ]
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": false,
+      "label": null,
+      "short_label": null,
+      "examples": null,
+      "multilingual": null,
+      "all_identical": null,
+      "all_nearly_identical": null,
+      "all_synonomous_no_context": null,
+      "all_synonymous_with_context": null,
+      "shared_pos": null,
+      "shared_pos_label": null,
+      "semantic_domains": null
+    }
+
+- role: user
+  content: |-
+    [
+      " took when we went horseback riding and[[ saw]] Bigfoot? I",
+      "江集团水库调度中心，记者见[[到了]]遥测通讯科",
+      "想要<linebreak>还有一次，是我自己上学[[看见]]一个小男孩在电线",
+      " a specific order, you may end up[[ seeing]] less music and spending",
+      ", but on the way Kelly and I[[ saw]] free samples of wine",
+      " Hop on death-defying coasters or[[ meet]] Snoopy in the",
+      " Arriving early gives you the opportunity to[[ see]] our practice and relax",
+      " In ninjago The Ride, guests[[ meet]] the famous heroes of",
+      "「驾车外出，没料到却[[目睹]]了上述的惊人",
+      " attending SA international conventions. I hope to[[ see]] you there.<linebreak>Higher",
+      ". They start kissing. Anna and Finn[[ watch]] them from a table",
+      "這樣咧<linebreak>想不到..還剛好[[看到]]小時候去南部",
+      "实现..<linebreak>5 [一线]男子偶[[遇]]“贵人”",
+      " Sierra Nevada Energy Watch project, I came[[ across]] a group that has",
+      " make sure that you are in school to[[ see]] us as we have",
+      "我會選擇用幾年時間去[[見]]證我仔女",
+      "小】【桥】【，】【偶】【[[见]]】【篱】【落",
+      "<bos>In late September we travelled to London to[[ see]] Florence and the Machine",
+      "-01-18<linebreak>偶[[遇]]吴亦凡开",
+      "ido Entiman. De ahí hemos[[ visto]], muy por enc"
+    ]
+
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Verbs of seeing / encountering",
+      "short_label": "SEE_ENCOUNTER",
+      "examples": ["see", "saw", "看见", "见", "watch", "visto"],
+      "multilingual": true,
+      "all_identical": false,
+      "all_nearly_identical": false,
+      "all_synonomous_no_context": true,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "VERBS",
+      "semantic_domains": []
+    }
+- role: user
+  content: |-
+    [
+      " took when we went horseback riding and[[ saw]] Bigfoot? I",
+      "江集团水库调度中心，记者见[[到了]]遥测通讯科",
+      "想要<linebreak>还有一次，是我自己上学[[看见]]一个小男孩在电线",
+      " a specific order, you may end up[[ seeing]] less music and spending",
+      ", but on the way Kelly and I[[ saw]] free samples of wine",
+      " Hop on death-defying coasters or[[ meet]] Snoopy in the",
+      " Arriving early gives you the opportunity to[[ see]] our practice and relax",
+      " In ninjago The Ride, guests[[ meet]] the famous heroes of",
+      "「驾车外出，没料到却[[目睹]]了上述的惊人",
+      ". They start kissing. Anna and Finn[[ watch]] them from a table",
+      "這樣咧<linebreak>想不到..還剛好[[看到]]小時候去南部",
+      "实现..<linebreak>5 [一线]男子偶[[遇]]“贵人”",
+      " Sierra Nevada Energy Watch project, I came[[ across]] a group that has",
+      " make sure that you are in school to[[ see]] us as we have",
+      "我會選擇用幾年時間去[[見]]證我仔女",
+      "小】【桥】【，】【偶】【[[见]]】【篱】【落",
+      "<bos>In late September we travelled to London to[[ see]] Florence and the Machine",
+      "-01-18<linebreak>偶[[遇]]吴亦凡开",
+      "ido Entiman. De ahí hemos[[ visto]], muy por enc"
+    ]
+
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Verbs of seeing / encountering",
+      "short_label": "SEE_ENCOUNTER",
+      "examples": ["see", "saw", "看见", "见", "watch", "visto"],
+      "multilingual": true,
+      "all_identical": false,
+      "all_nearly_identical": false,
+      "all_synonomous_no_context": true,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "VERBS",
+      "semantic_domains": []
+    }
+- role: user
+  content: |-
+    [
+      "1916年[[—]]1918",
+      "za<linebreak>«40.72[[ -]] 44.",
+      " - 28 from 9 am[[ -]] 12 noon",
+      ";2007.04[[-]]2014",
+      "<linebreak>2004.12[[-]]20",
+      1997.03[[-]]1997",
+      "任意参数范围:00μV[[~]]100V",
+      " 200 201[[ -]] 800",
+      ".<linebreak>Our high school students (9th[[ -]] 12th",
+      "7,80,000[[ -]] ₹ 10",
+      "盒B29-075[[~]]102随机",
+      ".6<linebreak>«8,74[[ -]] 16,",
+      "1 多多云 25°[[ ~]] 31°"
+    ]
+
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Range-separator punctuation (dash/tilde) indicating numeric or date spans",
+      "short_label": "RANGE_SEPARATOR",
+      "examples": ["-", "—", "~", "~", " - "],
+      "multilingual": true,
+      "all_identical": false,
+      "all_nearly_identical": false,
+      "all_synonomous_no_context": true,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "PUNCTUATION",
+      "semantic_domains": ["PUNCTUATION_MARK"]
+    }
+
+- role: user
+  content: |-
+    [
+      "of the government but his inalienable[[ human]] right, and insist",
+      "'s clear that the missing link there is[[ human]] to human engagement.<linebreak>",
+      "in front of traditional market players.<linebreak>The[[ human]] mind is a wizard",
+      ", there is a universality to the[[ human]] experience that we can",
+      "into your funnel.<linebreak>Simple. It's[[ human]] nature. We lur",
+      "<bos>Sinziana's photography explores[[ human]] intervention with nature in",
+      "sure.<linebreak>This fact pertains to the[[ human]] perception that when a",
+      "and objectively wrong. It is a horrible[[ human]] / civil rights ass",
+      "feel. Artistically I am inspired by[[ human]] interactions. Interactions",
+      "<bos>We emphasize the[[ human]] touch, so that"
+    ]
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Adjective meaning relating to people",
+      "short_label": "HUMAN_ADJ",
+      "examples": ["human"],
+      "multilingual": false,
+      "all_identical": true,
+      "all_nearly_identical": true,
+      "all_synonomous_no_context": true,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "ADJECTIVES_AND_ADVERBS",
+      "semantic_domains": ["HUMAN_ROLE_IDENTITY"]
+    }
+
+- role: user
+  content: |-
+    [
+      "y racismo<linebreak>2.3 Limit[[aciones]] impuestas<linebreak>2",
+      "002, The Moral and Environmental[[ Limits]] of Stakeholder Principle",
+      " conflict those qualifications and/or skills with the[[ limitations]] of doula care",
+      " respetan la forma y los lí[[mites]] leg",
+      "现实问题，是来自航权方面的[[限制]]。根据此前中美",
+      " queries. In this release many of those[[ restrictions]] are lifted.<linebreak>You",
+      " Australia regulates retail tenancies and protects the[[ rights]] of business tenants.",
+      " that federal civil rights laws restrict the \"[[rights]]\" of states,",
+      " years, pushing legislation to cripple the[[ rights]] of cigar smokers."
+    ]
+
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Legal scope words denoting limits or rights",
+      "short_label": "RIGHTS_LIMITS",
+      "examples": ["limits", "limitations", "restrictions", "rights", "限制"],
+      "multilingual": true,
+      "all_identical": false,
+      "all_nearly_identical": false,
+      "all_synonomous_no_context": false,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "NOUNS",
+      "semantic_domains": ["LEGAL_GOVERNANCE_TERM"]
+    }
+
+- role: user
+  content: |-
+    [
+      "ine proof dosing pumps and dosing[[ tanks]].",
+      ", so we had begun bringing our feed[[ers]] indoors each night to",
+      " as the worker cleaned a degreasing[[ tank]] at National Manufacturing on",
+      " to lift the cooktop out of the[[ bench]]. Most Cooktop",
+      "0-foot milk barn plus a manure[[ reservoir]] to be completed in",
+      " and debris are collected in a special dust[[ container]].<linebreak>To keep the",
+      "喷药要戴口罩、有药[[桶]]，非常辛苦，",
+      "<bos>Single bottle wine[[ tote]] bag which is manufactured",
+      " supplies stocked and removing the waste from the[[ tank]].<linebreak>At AW Waste",
+      "-2 to fill up the acidic water[[ container]] because 4 is"
+    ]
+
+- role: assistant
+  content: |-
+    {
+      "is_monosemantic": true,
+      "label": "Physical containers or holders for substances or items",
+      "short_label": "CONTAINER_NOUNS",
+      "examples": ["tank", "box", "container", "桶", "reservoir"],
+      "multilingual": true,
+      "all_identical": false,
+      "all_nearly_identical": false,
+      "all_synonomous_no_context": false,
+      "all_synonymous_with_context": true,
+      "shared_pos": true,
+      "shared_pos_label": "NOUNS",
+      "semantic_domains": []
+    }
