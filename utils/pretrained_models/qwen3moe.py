@@ -43,7 +43,7 @@ def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
         # SA
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
-        hidden_state, _, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
@@ -148,7 +148,7 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
         # SA
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
-        hidden_state, _, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
