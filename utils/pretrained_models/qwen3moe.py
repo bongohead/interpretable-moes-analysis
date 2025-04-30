@@ -1,15 +1,16 @@
 """
-Reversed engineered forward pass for OlMoE
-- See https://github.com/huggingface/transformers/blob/main/src/transformers/models/olmoe/modeling_olmoe.py
+Reversed engineered forward pass for Qwen
+- Supports Qwen3-30B-A3B, Qwen3-235B-A22B
+- See https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3_moe/modeling_qwen3_moe.py
 """
 import torch
 from ._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
-def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
+def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
     """
     Params:
-        @model: A model of class `OlmoeForCausalLM`.
+        @model: A model of class `Qwen2MoeForCausalLM`.
         @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
         @return_hidden_states: Boolean; whether to return hidden_states themselves.
@@ -46,18 +47,24 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
+        
         if return_hidden_states:
             all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
-        ####### OlMoESparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
+        ####### Qwen3MoeSparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
         batch_size, sequence_length, hidden_dim = hidden_state.shape
         moe_hidden_state = hidden_state.view(-1, hidden_dim)
-        router_logits = layer.mlp.gate(moe_hidden_state)
 
-        routing_weights = torch.nn.functional.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(routing_weights, layer.mlp.top_k, dim=-1, sorted = True)
+        router_logits = layer.mlp.gate(moe_hidden_state) # Size (BN, n_experts)
+        routing_weights = torch.nn.functional.softmax(router_logits, dim = 1, dtype = torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights, layer.mlp.top_k, dim = -1, sorted = True)
+        if layer.mlp.norm_topk_prob:
+            routing_weights /= routing_weights.sum(dim = -1, keepdim=True)
         routing_weights = routing_weights.to(moe_hidden_state.dtype)
-        final_hidden_states = torch.zeros((batch_size * sequence_length, hidden_dim), dtype = hidden_state.dtype, device = hidden_state.device)
+
+        final_hidden_states = torch.zeros((batch_size * sequence_length, hidden_dim), dtype = moe_hidden_state.dtype, device = moe_hidden_state.device)
+        
+        # One hot encode the selected experts to create an expert mask 
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes = layer.mlp.num_experts).permute(2, 1, 0)
 
         if return_hidden_states:
@@ -67,22 +74,21 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
         for expert_idx in range(layer.mlp.num_experts):
             expert_layer = layer.mlp.experts[expert_idx]
             idx, top_x = torch.where(expert_mask[expert_idx])
-
+            # Index the correct hidden states and compute the expert hidden state for the current expert.
             current_state = moe_hidden_state[None, top_x].reshape(-1, hidden_dim)
             current_expert_output = expert_layer(current_state) 
             current_hidden_states = current_expert_output * routing_weights[top_x, idx, None]
-
+            # However `index_add_` only support torch tensors for indexing so we'll use the `top_x` tensor here.
             final_hidden_states.index_add_(0, top_x, current_hidden_states.to(moe_hidden_state.dtype))
 
             if return_hidden_states:
                 layer_expert_outputs[top_x, idx] = current_expert_output.to(layer_expert_outputs.dtype)
 
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+        final_hidden_states = (final_hidden_states).reshape(batch_size, sequence_length, hidden_dim)
         #######
-
         hidden_state = final_hidden_states
         hidden_state = residual + hidden_state
-        
+
         all_topk_experts.append(selected_experts.detach().cpu())
         all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
 
@@ -103,10 +109,10 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
     }
 
 @torch.no_grad()
-def run_olmoe_with_ablation_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
+def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
     """
     Params:
-        @model: A model of class `OlmoeForCausalLM`.
+        @model: A model of class `Qwen2MoeForCausalLM`.
         @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
         @layers_to_ablate: A list of layer indices (0-indexed) for which experts will be ablated.
@@ -115,8 +121,6 @@ def run_olmoe_with_ablation_return_topk(model, input_ids, attention_mask, layers
         @return_hidden_states: Boolean; whether to return hidden_states themselves.
 
     Returns:
-        Note that returned values are SORTED.
-
         A dictionary with keys:
         - `logits`: The standard B x N x V LM output
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs. Returns tthe pre-ablation topk experts.
@@ -148,18 +152,21 @@ def run_olmoe_with_ablation_return_topk(model, input_ids, attention_mask, layers
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
+
         if return_hidden_states:
             all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
-        ####### OlMoESparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
+        ####### Qwen3MoeSparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
         batch_size, sequence_length, hidden_dim = hidden_state.shape
         moe_hidden_state = hidden_state.view(-1, hidden_dim)
-        router_logits = layer.mlp.gate(moe_hidden_state)
 
-        routing_weights = torch.nn.functional.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(routing_weights, layer.mlp.top_k, dim=-1, sorted = True)
+        router_logits = layer.mlp.gate(moe_hidden_state) # Size (BN, n_experts)
+        routing_weights = torch.nn.functional.softmax(router_logits, dim = 1, dtype = torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights, layer.mlp.top_k, dim = -1, sorted = True)
+        if layer.mlp.norm_topk_prob:
+            routing_weights /= routing_weights.sum(dim = -1, keepdim = True)
         routing_weights = routing_weights.to(moe_hidden_state.dtype)
-        final_hidden_states = torch.zeros((batch_size * sequence_length, hidden_dim), dtype = hidden_state.dtype, device = hidden_state.device)
+
         #### ABLATION
         if layer_ix in layers_to_ablate:
             row_sum_before = routing_weights.sum(dim = -1, keepdim = True) # Shaype (BN, 1)            
@@ -171,6 +178,9 @@ def run_olmoe_with_ablation_return_topk(model, input_ids, attention_mask, layers
                 scale_factor = row_sum_before / (row_sum_after + 1e-9)
                 routing_weights *= scale_factor
         ####
+        final_hidden_states = torch.zeros((batch_size * sequence_length, hidden_dim), dtype = moe_hidden_state.dtype, device = moe_hidden_state.device)
+
+        # One hot encode the selected experts to create an expert mask 
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes = layer.mlp.num_experts).permute(2, 1, 0)
 
         if return_hidden_states:
@@ -180,19 +190,18 @@ def run_olmoe_with_ablation_return_topk(model, input_ids, attention_mask, layers
         for expert_idx in range(layer.mlp.num_experts):
             expert_layer = layer.mlp.experts[expert_idx]
             idx, top_x = torch.where(expert_mask[expert_idx])
-
+            # Index the correct hidden states and compute the expert hidden state for the current expert.
             current_state = moe_hidden_state[None, top_x].reshape(-1, hidden_dim)
             current_expert_output = expert_layer(current_state) 
             current_hidden_states = current_expert_output * routing_weights[top_x, idx, None]
-
+            # However `index_add_` only support torch tensors for indexing so we'll use the `top_x` tensor here.
             final_hidden_states.index_add_(0, top_x, current_hidden_states.to(moe_hidden_state.dtype))
 
             if return_hidden_states:
                 layer_expert_outputs[top_x, idx] = current_expert_output.to(layer_expert_outputs.dtype)
 
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+        final_hidden_states = (final_hidden_states).reshape(batch_size, sequence_length, hidden_dim)
         #######
-
         hidden_state = final_hidden_states
         hidden_state = residual + hidden_state
 

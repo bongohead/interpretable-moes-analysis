@@ -4,29 +4,8 @@ Reversed engineered forward pass for Qwen
 - See https://huggingface.co/deepseek-ai/DeepSeek-V2-Lite/blob/main/modeling_deepseek.py
 """
 import torch
+from ._pretrained_helpers import _sort_gate_tensors
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
-
-def _sort_gate_tensors(ids: torch.Tensor, weights: torch.Tensor, expert_outputs: torch.Tensor | None = None):
-    """
-    Sort the `topk` axis descending by `weights`, and apply the same permutation to expert IDs (and optional raw expert outputs). 
-    For Deepseek-based architectures, these need to be sorted after the forward pass, since the MoE MUST be run with sorted = False.
-
-    Params:
-        @ids: BN x k tensor of expert IDs
-        @weights: BN x k tensor of gate probs
-        @outputs BN x k x D tensor of raw expert outputs (optional)
-
-    Returns:
-        ids_sorted, weights_sorted, outputs_sorted (None if outputs is None)
-    """
-    weights_sorted, order = torch.sort(weights, dim = 1, descending = True)
-    ids_sorted = torch.take_along_dim(ids, order, dim = 1)
-    if expert_outputs is None:
-        return ids_sorted, weights_sorted, None
-    expert_outputs_sorted = torch.take_along_dim(
-        expert_outputs, order.unsqueeze(-1), dim = 1
-    )
-    return ids_sorted, weights_sorted, expert_outputs_sorted
 
 @torch.no_grad()
 def run_dsv2_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
