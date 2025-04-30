@@ -12,6 +12,7 @@ pip install tqdm
 pip install python-dotenv
 pip install datasets
 pip install scikit-learn
+pip install kaleido
 # CUDA-based ML https://docs.rapids.ai/install/
 pip install \
     --extra-index-url=https://pypi.nvidia.com \
