@@ -232,25 +232,24 @@ def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, lay
     }
 
 @torch.no_grad()
-def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_states = False, ablation_targets = {}, ablation_penalty = 1e6, history_k = 0):
+def run_qwen3moe_with_path_ablation(model, input_ids, attention_mask, ablation_targets = {}, ablation_penalty = 1e9):
     """
     Params:
         @model: A model of class `Qwen3MoeForCausalLM`.
         @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
-        @return_hidden_states: Boolean; whether to return hidden_states themselves
         @ablation_targets: Dict specifying ablation rules, noting that both experts and layers are 0-indexed. For example:
          `{
-            5: {
-                (0,): 2, # Ablate expert #2 in layer #5 if previous expert was expert #0
-                (1, 2): 10 # Ablate expert #10 in layer #5 if previous expert was expert #1 -> expert #2 (in previous 2 layers)
-            },
+            5: [
+                ((0,), 2), # Ablate expert #2 in layer #5 if previous expert was expert #0
+                ((1, 2), 10) # Ablate expert #10 in layer #5 if previous expert was expert #1 -> expert #2 (in previous 2 layers)
+            ],
             6: {
                ...
             }
          }`
         @ablation_penalty: Large positive value subtracted from logits for ablation..
-        @history_k: Int; whyich of the top-k experts to track for path history (1-indexed)
+        @history_k: Int; which of the top-k experts to track for path history
 
     Returns:
         A dictionary with keys:
@@ -258,11 +257,10 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights
         - `token_path_history`: B x N x num_layers tensor showing the top-`history_k` expert chosen at each layer.
-        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
-        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
-        - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
+        - `num_ablations_applied`: Integer count of how many times the ablation penalty was applied.
     """
     input_embeds = model.model.embed_tokens(input_ids)
+    hidden_state = input_embeds
 
     B, N, D = input_embeds.shape
     num_layers = len(model.model.layers)
@@ -270,16 +268,12 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
 
     cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
     position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
-    
-    hidden_state = input_embeds
+    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)    
     position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
 
     all_topk_experts = []
     all_topk_weights = []
-    all_pre_mlp_hidden_states = []
-    all_hidden_states = []
-    all_expert_outputs = []
+    num_ablations_applied = 0
 
     for layer_ix, layer in enumerate(model.model.layers):
         # SA
@@ -289,9 +283,6 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
-
-        if return_hidden_states:
-            all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
         
         ####### Qwen3MoeSparseMoeBlock - below code replaces hidden_state = layer.mlp(hidden_state)
         batch_size, sequence_length, hidden_dim = hidden_state.shape
@@ -324,14 +315,16 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
 
                     # Apply penalty using the final mask
                     if torch.any(final_ablation_mask):
-                         modified_router_logits[final_ablation_mask, target_expert_to_ablate] -= ablation_penalty
+                        num_ablations_for_rule = final_ablation_mask.sum().item()
+                        num_ablations_applied += num_ablations_for_rule
+                        modified_router_logits[final_ablation_mask, target_expert_to_ablate] -= ablation_penalty
         ### Ablation Logic End ###
 
         # 3. Select Experts using *Modified* Logits
         _, selected_experts = torch.topk(modified_router_logits, layer.mlp.top_k, dim = -1, sorted = True) # BN x topk
 
         # --- Update history (using the selected top-k'th expert) ---
-        current_history_k = min(history_k, selected_experts.shape[-1] - 1)
+        current_history_k = min(0, selected_experts.shape[-1] - 1)
         history_expert_ids = selected_experts[:, current_history_k].view(B, N)
         if token_path_history.shape[2] > layer_ix:
              token_path_history[:, :, layer_ix] = history_expert_ids
@@ -349,9 +342,6 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
         # One hot encode the selected experts to create an expert mask 
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes = layer.mlp.num_experts).permute(2, 1, 0)
 
-        if return_hidden_states:
-            layer_expert_outputs = torch.zeros((batch_size * sequence_length, layer.mlp.top_k, hidden_dim), dtype = moe_hidden_state.dtype, device = moe_hidden_state.device) # BN x topk x D
-
         # Loop over all available experts in the model and perform the computation on each expert
         for expert_idx in range(layer.mlp.num_experts):
             expert_layer = layer.mlp.experts[expert_idx]
@@ -362,9 +352,6 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
             current_hidden_states = current_expert_output * routing_weights[top_x, idx, None]
             # However `index_add_` only support torch tensors for indexing so we'll use the `top_x` tensor here.
             final_hidden_states.index_add_(0, top_x, current_hidden_states.to(moe_hidden_state.dtype))
-            
-            if return_hidden_states:
-                layer_expert_outputs[top_x, idx] = current_expert_output.to(layer_expert_outputs.dtype)
 
         final_hidden_states = (final_hidden_states).reshape(batch_size, sequence_length, hidden_dim)
         #######
@@ -374,10 +361,6 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
         all_topk_experts.append(selected_experts.detach().cpu())
         all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
 
-        if return_hidden_states:
-            all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
-            all_expert_outputs.append(layer_expert_outputs.detach().cpu())
-
     hidden_state = model.model.norm(hidden_state)
     logits = model.lm_head(hidden_state)
 
@@ -386,7 +369,155 @@ def run_qwen3moe_with_ablation(model, input_ids, attention_mask, return_hidden_s
         'all_topk_experts': all_topk_experts,
         'all_topk_weights': all_topk_weights,
         'token_path_history': token_path_history,
-        'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states,
-        'all_hidden_states': all_hidden_states,
-        'all_expert_outputs': all_expert_outputs
+        'num_ablations_applied': num_ablations_applied
     }
+
+# @torch.no_grad()
+# def run_qwen3moe_with_layer_ablation_by_expert(model, input_ids, attention_mask, return_hidden_states = False, layer_ablation_targets = {}, ablation_penalty = 1e6):
+#     """
+#     Runs Qwen2-MoE forward pass, extracts internal states, and applies within-layer ablation
+#     *only if* the targeted expert was the original top-1 choice for that token.
+
+#     Params:
+#         model: A model of class `Qwen2MoeForCausalLM`.
+#         input_ids: A B x N tensor of inputs IDs on the same device as `model`.
+#         attention_mask: A B x N tensor of mask indicators on the same device as `model`.
+#         layer_ablation_targets: Optional Dict specifying ablation rules:
+#                          { layer_index: [list_of_expert_indices_to_ablate] }.
+#                          If None, no ablation is performed.
+#         ablation_penalty: Large positive value subtracted from logits for ablation.
+#         return_hidden_states: Boolean; whether to return hidden_states themselves.
+
+#     Returns:
+#         A dictionary containing logits, expert choices/weights, and optionally hidden states.
+#         (token_path_history is removed as it's not needed for this ablation type).
+#     """
+#     if layer_ablation_targets is None:
+#         layer_ablation_targets = {} # Ensure it's a dict
+
+#     # --- Initial Setup ---
+#     input_embeds = model.model.embed_tokens(input_ids)
+#     hidden_state = input_embeds
+#     B, N, D = hidden_state.shape
+#     num_layers = len(model.model.layers)
+
+#     # --- Attention Mask & Positional Embeddings ---
+#     cache_position = torch.arange(0, N, device=input_embeds.device)
+#     position_ids = cache_position.unsqueeze(0)
+#     causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
+#     position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
+
+#     # --- Lists to store results ---
+#     all_topk_experts_list = []
+#     all_topk_weights_list = []
+#     all_pre_mlp_hidden_states_list = []
+#     all_hidden_states_list = []
+#     all_expert_outputs_list = []
+
+#     # --- Layer Loop ---
+#     for layer_ix, layer in enumerate(model.model.layers):
+
+#         # --- Standard Attention Block ---
+#         residual = hidden_state
+#         hidden_state_ln = layer.input_layernorm(hidden_state)
+#         attn_output, _ = layer.self_attn(
+#             hidden_states=hidden_state_ln,
+#             attention_mask=causal_mask,
+#             position_ids=position_ids,
+#             position_embeddings=position_embeddings
+#         )
+#         hidden_state = residual + attn_output
+#         residual = hidden_state
+#         pre_mlp_hidden_state = layer.post_attention_layernorm(hidden_state)
+
+#         if return_hidden_states:
+#             all_pre_mlp_hidden_states_list.append(pre_mlp_hidden_state.view(-1, D).detach().cpu())
+
+#         # --- MoE Block with Layer Ablation ---
+#         batch_size, sequence_length, hidden_dim = pre_mlp_hidden_state.shape
+#         moe_hidden_state = pre_mlp_hidden_state.view(-1, hidden_dim) # BN x D
+#         BN = moe_hidden_state.shape[0]
+
+#         # 1. Calculate Original Logits (used for weights AND original top-1 check)
+#         router_logits = layer.mlp.gate(moe_hidden_state) # Size (BN, n_experts)
+#         n_experts = router_logits.shape[-1]
+
+#         # 2. Apply Ablation to Logits (used for selection)
+#         modified_router_logits = router_logits.clone() # Start with original logits
+
+#         if layer_ix in layer_ablation_targets:
+#             # Determine original top-1 choice BEFORE applying any penalties
+#             original_top1_indices_flat = torch.argmax(router_logits, dim=-1) # Shape (BN,)
+
+#             experts_to_ablate_in_layer = layer_ablation_targets[layer_ix]
+#             for target_expert_to_ablate in experts_to_ablate_in_layer:
+#                 if 0 <= target_expert_to_ablate < n_experts: # Basic check
+#                     # Create mask for tokens that originally chose this target expert as top-1
+#                     # Shape (BN,)
+#                     top1_matches_target_mask = (original_top1_indices_flat == target_expert_to_ablate)
+
+#                     # Apply penalty using the mask
+#                     if torch.any(top1_matches_target_mask):
+#                          modified_router_logits[top1_matches_target_mask, target_expert_to_ablate] -= ablation_penalty
+#                 else:
+#                     print(f"Warning: Invalid expert index {target_expert_to_ablate} specified for ablation in layer {layer_ix}")
+
+
+#         # 3. Select Experts using *Modified* Logits
+#         top_k = layer.mlp.top_k
+#         _, selected_experts = torch.topk(modified_router_logits, top_k, dim = -1, sorted = True) # BN x topk
+
+#         # --- History Update Removed (Not needed for this ablation type) ---
+
+#         # 4. Calculate Weights using *Original* Logits and *Selected* Experts
+#         routing_weights = torch.nn.functional.softmax(router_logits, dim=1, dtype=torch.float) # Use original logits
+#         routing_weights = torch.gather(routing_weights, 1, selected_experts) # BN x topk
+#         if hasattr(layer.mlp, 'norm_topk_prob') and layer.mlp.norm_topk_prob:
+#              routing_weights /= routing_weights.sum(dim=-1, keepdim=True) + 1e-9
+#         routing_weights = routing_weights.to(moe_hidden_state.dtype)
+
+#         # --- Expert Computation ---
+#         # [Expert computation loop remains exactly the same as the previous function]
+#         final_hidden_states = torch.zeros((BN, hidden_dim), dtype = moe_hidden_state.dtype, device = moe_hidden_state.device)
+#         num_experts = layer.mlp.num_experts
+#         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes = num_experts).permute(2, 1, 0) # N_experts x topk x BN
+
+#         if return_hidden_states:
+#             layer_expert_outputs = torch.zeros((BN, top_k, hidden_dim), dtype = moe_hidden_state.dtype, device = moe_hidden_state.device)
+
+#         for expert_idx in range(num_experts):
+#             expert_layer = layer.mlp.experts[expert_idx]
+#             top_k_rank_indices, token_indices = torch.where(expert_mask[expert_idx])
+#             if token_indices.numel() > 0:
+#                  current_state = moe_hidden_state[token_indices]
+#                  current_expert_output = expert_layer(current_state)
+#                  current_weights = routing_weights[token_indices, top_k_rank_indices, None]
+#                  current_hidden_states = current_expert_output * current_weights
+#                  final_hidden_states.index_add_(0, token_indices, current_hidden_states.to(moe_hidden_state.dtype))
+#                  if return_hidden_states:
+#                       layer_expert_outputs[token_indices, top_k_rank_indices] = current_expert_output.to(layer_expert_outputs.dtype)
+
+#         final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+#         hidden_state = residual + final_hidden_states
+
+#         # --- Store results for this layer ---
+#         all_topk_experts_list.append(selected_experts.detach().cpu())
+#         all_topk_weights_list.append(routing_weights.detach().cpu().to(torch.float32))
+
+#         if return_hidden_states:
+#             all_hidden_states_list.append(hidden_state.view(-1, D).detach().cpu())
+#             all_expert_outputs_list.append(layer_expert_outputs.detach().cpu())
+
+#     # --- Final Layer Norm and LM Head ---
+#     hidden_state = model.model.norm(hidden_state)
+#     logits = model.lm_head(hidden_state)
+
+#     return {
+#         'logits': logits,
+#         'all_topk_experts': all_topk_experts_list,
+#         'all_topk_weights': all_topk_weights_list,
+#         # Removed token_path_history as it's not needed for this function's core logic
+#         'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states_list,
+#         'all_hidden_states': all_hidden_states_list,
+#         'all_expert_outputs': all_expert_outputs_list
+#     }
