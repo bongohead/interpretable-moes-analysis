@@ -261,7 +261,7 @@ def run_olmoe_return_topk_with_path_ablation(model, input_ids, attention_mask, a
         'logits': logits,
         'all_topk_experts': all_topk_experts,
         'all_topk_weights': all_topk_weights,
-        'token_path_history': token_path_history,
+        'token_path_history': token_path_history.detach().cpu(),
         'num_ablations_applied': num_ablations_applied
     }
 
