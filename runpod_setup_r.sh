@@ -1,14 +1,14 @@
 # Install R & Rstudio server
-sudo mkdir -p /etc/apt/keyrings
+mkdir -p /etc/apt/keyrings
 wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc \
-  | sudo tee /etc/apt/keyrings/cran.asc
+  | tee /etc/apt/keyrings/cran.asc
 
 echo "deb [signed-by=/etc/apt/keyrings/cran.asc] \
 https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/" \
- | sudo tee /etc/apt/sources.list.d/cran.list
+ | tee /etc/apt/sources.list.d/cran.list
 
-sudo apt update -qq
-sudo apt install -y --no-install-recommends r-base r-base-dev
+apt update -qq
+apt install -y --no-install-recommends r-base r-base-dev
 
 # Set locales
 apt-get install -y locales
