@@ -3,7 +3,9 @@ This directory contains code to run forward passes, storing activations, top-ks,
 
 
 ## Usage
-- `export-activations.ipynb`: For several pretrained MoEs, this will run forward passes through a multilingual C4 dataset. Then, it will export the pre-MLP activations, top-k expert outputs, as well as corresponding top-k expert ids and sample tokens for later reconstruction.
+- `export-activations-sm.ipynb`: For several pretrained MoEs, this will run forward passes through a multilingual C4 dataset. Then, it will export the pre-MLP activations, top-k expert outputs, as well as corresponding top-k expert ids and sample tokens for later reconstruction.
+
+
 - `export-activations-dense.ipynb`: For several pretrained dense models, this will run forward passes through the same multilingual C4 dataset. Then, it will export the pre-MLP activations and corresponding sample tokens for later reconstruction.
 - `export-topk.ipynb`: This runs forward passes through a multilingual C4 dataset, but does NOT store any activations - only the top-k expert ids and sample tokens. This is obviously way more memory efficient and can generate significantly larger samples!
 
