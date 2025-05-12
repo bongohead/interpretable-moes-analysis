@@ -110,7 +110,7 @@ def run_qwen2moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
     }
 
 @torch.no_grad()
-def run_qwen2moe_with_ablation_return_topk(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
+def run_qwen2moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_ablate = [], topk_to_ablate = [], renorm = False, return_hidden_states = False):
     """
     Params:
         @model: A model of class `Qwen2MoeForCausalLM`.
