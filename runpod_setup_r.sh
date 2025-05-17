@@ -21,7 +21,7 @@ R -e "install.packages('IRkernel', Ncpus = 8); IRkernel::installspec(user = FALS
 
 jupyter kernelspec list
 
-apt-get install -y libxml2-dev libfontconfig1-dev libcurl4-openssl-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev
+apt-get install -y libxml2-dev libfontconfig1-dev libcurl4-openssl-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev libssl-dev 
 R -e "install.packages('tidyverse', Ncpus = 8);"
 R -e "install.packages('data.table', Ncpus = 8);"
 R -e "install.packages('slider', Ncpus = 8);"
@@ -31,6 +31,8 @@ apt install fonts-cmu
 R -e "install.packages('extrafont', Ncpus = 8);"
 R -e "install.packages('svglite', Ncpus = 8);"
 
+# Fix issue with list-cols not displaying
+R -e "install.packages('remotes'); remotes::install_github('IRkernel/repr'); IRkernel::installspec()"
 # Rstudio setup - need to expose port 8787 in runpod TCP
 # apt-get install -y gdebi-core
 # wget https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2025.05.0-496-amd64.deb
