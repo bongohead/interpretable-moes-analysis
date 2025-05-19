@@ -21,6 +21,7 @@ def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights
         - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
+        - `all_router_logits: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x n_experts tensor of router logits
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
@@ -36,6 +37,7 @@ def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
     all_topk_experts = []
     all_topk_weights = []
     all_pre_mlp_hidden_states = []
+    all_router_logits = []
     all_hidden_states = []
     all_expert_outputs = []
 
@@ -93,6 +95,7 @@ def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
         all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
 
         if return_hidden_states:
+            all_router_logits.append(router_logits.detach().cpu())
             all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
             all_expert_outputs.append(layer_expert_outputs.detach().cpu())
 
@@ -104,6 +107,7 @@ def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
         'all_topk_experts': all_topk_experts,
         'all_topk_weights': all_topk_weights,
         'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states,
+        'all_router_logits': all_router_logits,
         'all_hidden_states': all_hidden_states,
         'all_expert_outputs': all_expert_outputs
     }
@@ -405,6 +409,7 @@ def run_qwen3moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
         - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs. Returns tthe pre-ablation topk experts.
         - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights. Returns the post-ablation weights.
         - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
+        - `all_router_logits: A list of length equal to the number of MoE layers, with each element a BN x n_experts tensor of router logits. Returns the pre-ablation logits.
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
@@ -420,6 +425,7 @@ def run_qwen3moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
     all_topk_experts = []
     all_topk_weights = []
     all_pre_mlp_hidden_states = []
+    all_router_logits = []
     all_hidden_states = []
     all_expert_outputs = []
 
@@ -495,6 +501,7 @@ def run_qwen3moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
         all_topk_weights.append(routing_weights.cpu().to(torch.float32))
 
         if return_hidden_states:
+            all_router_logits.append(router_logits.detach().cpu())
             all_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
             all_expert_outputs.append(layer_expert_outputs.cpu())
 
@@ -506,6 +513,7 @@ def run_qwen3moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
         'all_topk_experts': all_topk_experts,
         'all_topk_weights': all_topk_weights,
         'all_pre_mlp_hidden_states': all_pre_mlp_hidden_states,
+        'all_router_logits': all_router_logits,
         'all_hidden_states': all_hidden_states,
         'all_expert_outputs': all_expert_outputs
     }
