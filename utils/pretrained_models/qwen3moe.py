@@ -1,6 +1,6 @@
 """
 Reversed engineered forward pass for Qwen
-- Supports Qwen3-30B-A3B, Qwen3-235B-A22B
+- Supports Qwen3-30B-A3B and Qwen3-235B-A22B
 - See https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3_moe/modeling_qwen3_moe.py
 """
 import torch

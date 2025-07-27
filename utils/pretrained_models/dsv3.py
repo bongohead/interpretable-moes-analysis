@@ -27,7 +27,7 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
     B, N = input_ids.shape[:2]
-    position_ids = torch.arange(0, N, dtype=torch.long, device = model.device).unsqueeze(0)
+    position_ids = torch.arange(0, N, dtype = torch.long, device = model.device).unsqueeze(0)
     inputs_embeds = model.model.embed_tokens(input_ids)
     
     if model.model._use_flash_attention_2:

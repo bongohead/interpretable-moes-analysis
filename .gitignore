@@ -1,11 +1,6 @@
 # Misc
 .env
-*.csv
-*.db
 *.env
-*.html
-*.pt
-*.pkl
 
 # Python
 .venv
@@ -22,6 +17,14 @@ __pycache__
 
 # Data
 *.json
+*.parquet
+*.csv
+*.db
+*.pt
+*.pkl
+
+# Web
+*.html
 
 # Images
 **/exports/*
