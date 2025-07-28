@@ -30,10 +30,12 @@ R -e "install.packages('slider', Ncpus = 8);"
 apt install fonts-cmu 
 R -e "install.packages('extrafont', Ncpus = 8);"
 R -e "install.packages('svglite', Ncpus = 8);"
+R -e "install.packages('ggtext', Ncpus = 8);"
 
 # Fix issue with list-cols not displaying
 R -e "install.packages('remotes'); remotes::install_github('IRkernel/repr'); IRkernel::installspec()"
-# Rstudio setup - need to expose port 8787 in runpod TCP
+
+# Rstudio setup - need to expose port 8887 in runpod TCP
 # apt-get install -y gdebi-core
 # wget https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2025.05.0-496-amd64.deb
 # apt-get update -qq
