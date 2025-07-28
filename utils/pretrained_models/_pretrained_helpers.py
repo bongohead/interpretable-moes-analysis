@@ -3,9 +3,10 @@ import torch
 def _sort_gate_tensors(ids: torch.Tensor, weights: torch.Tensor, expert_outputs: torch.Tensor | None = None):
     """
     Sort the `topk` axis descending by `weights`, and apply the same permutation to expert IDs (and optional raw expert outputs). 
-    - For Deepseek-based architectures, all functions that return top-k or activations must sort these, since the MoE MUST be run with sorted = False.
-    - For OlMoE/Qwen, MoEs can be run with sorted = True. However, it may be useful to call this on code that involves ablation to re-sort the IDs,
-      weights, and expert outputs according to the new topk order.
+    - For Deepseek-based architectures, all functions that return top-k or activations must sort these, since the MoE 
+      MUST be run with sorted = False.
+    - For most models, MoEs can be run with sorted = True. However, it may be useful to call this on code that involves 
+      ablation to re-sort the IDs, weights, and expert outputs according to the new topk order.
  
     Params:
         @ids: BN x k tensor of expert IDs
