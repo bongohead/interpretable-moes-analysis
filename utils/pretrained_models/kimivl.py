@@ -13,7 +13,7 @@ from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_m
 def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None, image_grid_hws = None, return_hidden_states = False):
     """
     Params:
-        @model: A model of class `DeepseekV3ForCausalLM`.
+        @model: A model of class `KimiVLForConditionalGeneration`.
         @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
         @pixel_values:  A L x 3 x P x P tensor of image processor vision patches, only pass for image inputs.
