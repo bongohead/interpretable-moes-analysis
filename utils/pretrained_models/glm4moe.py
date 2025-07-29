@@ -31,8 +31,10 @@ def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_stat
 
     # Helpers
     def to_device(t, dev):
-        """Move tensor `t` to `dev` **only if necessary**."""
-        return t if t.device == dev else t.to(dev, non_blocking = True)
+        """
+        Move tensor `t` to `dev` only if necessary
+        """
+        return t if t is None or t.device == dev else t.to(dev, non_blocking = True)
 
     ##### Setup #####
     # Pick the device that holds the token‑embedding weights as our starting point.
@@ -74,21 +76,21 @@ def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_stat
 
         # Move working tensors to that GPU (if not already there)
         hidden_state = to_device(hidden_state, layer_dev)
-        causal_mask_dev = to_device(causal_mask, layer_dev)
-        position_ids_dev = to_device(position_ids, layer_dev)
+        causal_mask = to_device(causal_mask, layer_dev)
+        position_ids = to_device(position_ids, layer_dev)
         cos = to_device(cos_global, layer_dev)
         sin = to_device(sin_global, layer_dev)
-        pos_emb_dev = (cos, sin)
+        pos_emb = (cos, sin)
 
         # SA 
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
         hidden_state, _ = layer.self_attn(
             hidden_states = hidden_state,
-            attention_mask = causal_mask_dev,
-            position_ids = position_ids_dev,
+            attention_mask = causal_mask,
+            position_ids = position_ids,
             cache_position = cache_position,
-            position_embeddings = pos_emb_dev,
+            position_embeddings = pos_emb,
         )
         hidden_state = residual + hidden_state
 
