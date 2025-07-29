@@ -2,11 +2,12 @@
 Reversed engineered forward pass for GLM-4.5
 - Supports GLM-4.5 and GLM-4.5-Air
 - See https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm4_moe/modeling_glm4_moe.py
+- This supports multiple device usage
 """
 import torch
 from transformers.masking_utils import create_causal_mask
 from transformers.models.glm4_moe.modeling_glm4_moe import Glm4MoeMoE
-from ._pretrained_helpers import _sort_gate_tensors
+from ._pretrained_helpers import _sort_gate_tensors, _move_device
 
 @torch.no_grad()
 def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_states: bool = False):
@@ -27,35 +28,18 @@ def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_stat
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
-    cfg = model.model.config
-
-    # Helpers
-    def to_device(t, dev):
-        """
-        Move tensor `t` to `dev` only if necessary
-        """
-        return t if t is None or t.device == dev else t.to(dev, non_blocking = True)
-
     ##### Setup #####
     # Pick the device that holds the token‑embedding weights as our starting point.
     emb_device = model.model.embed_tokens.weight.device
-    input_ids = to_device(input_ids, emb_device)
-    attention_mask = to_device(attention_mask, emb_device)
+    input_ids = _move_device(input_ids, emb_device)
+    attention_mask = _move_device(attention_mask, emb_device)
 
     input_embeds = model.model.embed_tokens(input_ids) # (B, N, D)
     B, N, D = input_embeds.shape
 
     cache_position = torch.arange(N, device = emb_device)
     position_ids = cache_position.unsqueeze(0) # (1, N)
-
-    causal_mask = create_causal_mask(
-        config = cfg,
-        input_embeds = input_embeds,
-        attention_mask = attention_mask,
-        cache_position = cache_position,
-        past_key_values = None,
-        position_ids = position_ids,
-    ) # (B, 1, N, N)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids) # (B, 1, N, N)
 
     # Compute ROPE embs (copy to each GPU as needed)
     position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
@@ -63,10 +47,12 @@ def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_stat
 
     hidden_state = input_embeds
 
-    # Diagnostic containers
-    all_topk_experts, all_topk_weights = [], []
-    all_pre_mlp_hidden_states, all_router_logits = [], []
-    all_hidden_states, all_expert_outputs = [], []
+    all_topk_experts = []
+    all_topk_weights = []
+    all_pre_mlp_hidden_states = []
+    all_router_logits = []
+    all_hidden_states = []
+    all_expert_outputs = []
 
     ##### Transformer Layers #####
     for layer in model.model.layers:
@@ -75,11 +61,11 @@ def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_stat
         layer_dev = next(layer.parameters()).device
 
         # Move working tensors to that GPU (if not already there)
-        hidden_state = to_device(hidden_state, layer_dev)
-        causal_mask = to_device(causal_mask, layer_dev)
-        position_ids = to_device(position_ids, layer_dev)
-        cos = to_device(cos_global, layer_dev)
-        sin = to_device(sin_global, layer_dev)
+        hidden_state = _move_device(hidden_state, layer_dev)
+        causal_mask = _move_device(causal_mask, layer_dev)
+        position_ids = _move_device(position_ids, layer_dev)
+        cos = _move_device(cos_global, layer_dev)
+        sin = _move_device(sin_global, layer_dev)
         pos_emb = (cos, sin)
 
         # SA 
@@ -156,9 +142,9 @@ def run_glm4moe_return_topk(model, input_ids, attention_mask, return_hidden_stat
             all_hidden_states.append(hidden_state.view(-1, D_).detach().cpu())
 
     ##### LM head  #####
-    hidden_state = to_device(hidden_state, model.model.norm.weight.device)
+    hidden_state = _move_device(hidden_state, model.model.norm.weight.device)
     hidden_state = model.model.norm(hidden_state)
-    hidden_state = to_device(hidden_state, model.lm_head.weight.device)
+    hidden_state = _move_device(hidden_state, model.lm_head.weight.device)
     logits = model.lm_head(hidden_state).to(input_ids.device)
 
     return {
