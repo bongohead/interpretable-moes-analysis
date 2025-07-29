@@ -14,7 +14,6 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
         @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
         @return_hidden_states: Boolean; whether to return hidden_states themselves.
 
-
     Returns:
         A dictionary with keys:
         - `logits`: The standard B x N x V LM output
@@ -31,9 +30,9 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
     position_ids = cache_position.unsqueeze(0)
     causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, output_attentions = False)
     mamba_mask = model.model._update_mamba_mask(attention_mask, cache_position)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids) if model.model.rotary_emb is not None else None
 
     hidden_state = input_embeds
-    position_embeddings = model.model.rotary_emb(input_embeds, position_ids) if model.model.rotary_emb is not None else None
 
     all_topk_experts = []
     all_topk_weights = []

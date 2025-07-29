@@ -6,8 +6,8 @@ Reversed engineered forward pass for Kimi-VL models
    to `model.language_model`.
 """
 import torch
-from ._pretrained_helpers import _sort_gate_tensors
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+from ._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
 def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None, image_grid_hws = None, return_hidden_states = False):
