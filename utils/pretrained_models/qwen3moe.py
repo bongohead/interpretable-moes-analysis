@@ -4,6 +4,7 @@ Reversed engineered forward pass for Qwen
 - See https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3_moe/modeling_qwen3_moe.py
 """
 import torch
+from transformers.masking_utils import create_causal_mask
 from ._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
@@ -26,13 +27,14 @@ def run_qwen3moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
     input_embeds = model.model.embed_tokens(input_ids)
-    
-    cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
+    B, N, D = input_embeds.shape
+
+    cache_position = torch.arange(0, N, device = input_embeds.device)
     position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
     hidden_state = input_embeds
-    position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
 
     all_topk_experts = []
     all_topk_weights = []
@@ -143,16 +145,17 @@ def run_qwen3moe_with_path_ablation(model, input_ids, attention_mask, ablation_t
         - `num_ablations_applied`: Integer count of how many times the ablation penalty was applied.
     """
     input_embeds = model.model.embed_tokens(input_ids)
-    hidden_state = input_embeds
-
-    B, N, D = hidden_state.shape
+    
+    B, N, D = input_embeds.shape
     num_layers = len(model.model.layers)
     token_path_history = torch.full((B, N, num_layers), -1, dtype = torch.long, device = input_ids.device)
 
-    cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
+    cache_position = torch.arange(0, N, device = input_embeds.device)
     position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
-    position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
+
+    hidden_state = input_embeds
 
     all_topk_experts = []
     all_topk_weights = []
@@ -282,16 +285,17 @@ def run_qwen3moe_with_expert_ablation(model, input_ids, attention_mask, ablation
         - `num_ablations_applied`: Integer count of how many times the ablation penalty was applied.
     """
     input_embeds = model.model.embed_tokens(input_ids)
-    hidden_state = input_embeds
-
-    B, N, D = hidden_state.shape
+    
+    B, N, D = input_embeds.shape
     num_layers = len(model.model.layers)
     token_path_history = torch.full((B, N, num_layers), -1, dtype = torch.long, device = input_ids.device)
 
-    cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
+    cache_position = torch.arange(0, N, device = input_embeds.device)
     position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
-    position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
+
+    hidden_state = input_embeds
 
     all_topk_experts = []
     all_topk_weights = []
@@ -415,12 +419,16 @@ def run_qwen3moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
     """
     input_embeds = model.model.embed_tokens(input_ids)
     
-    cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
+    B, N, D = input_embeds.shape
+    num_layers = len(model.model.layers)
+    token_path_history = torch.full((B, N, num_layers), -1, dtype = torch.long, device = input_ids.device)
+
+    cache_position = torch.arange(0, N, device = input_embeds.device)
     position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
     hidden_state = input_embeds
-    position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
 
     all_topk_experts = []
     all_topk_weights = []
