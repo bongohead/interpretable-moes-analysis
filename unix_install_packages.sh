@@ -1,7 +1,7 @@
 pip install --upgrade jupyterlab ipywidgets jupyterlab-widgets
 pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu124
 pip install bitsandbytes==0.46.1
-pip install transformers==4.54.0
+pip install transformers==4.54.1
 pip install accelerate==1.9.0
 pip install plotly.express
 pip install wandb
