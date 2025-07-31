@@ -1,11 +1,13 @@
 """
 Reversed engineered forward pass for Qwen
 - Supports Deepseek-v3/R1 and Moonlight
-- See https://huggingface.co/deepseek-ai/DeepSeek-R1/blob/main/modeling_deepseek.py
+- Model file: https://huggingface.co/deepseek-ai/DeepSeek-R1/blob/main/modeling_deepseek.py
+- Note that old Deepseek-v3 model files are incompatible with transformers v4.54+; instead load the model with trust_remote_code = False
+  to force transformers compatibility: https://github.com/huggingface/transformers/blob/main/src/transformers/models/deepseek_v2/modeling_deepseek_v2.py
 """
 import torch
 from ._pretrained_helpers import _sort_gate_tensors
-from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+from transformers.masking_utils import create_causal_mask
 
 @torch.no_grad()
 def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
@@ -26,16 +28,16 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
-    B, N = input_ids.shape[:2]
-    position_ids = torch.arange(0, N, dtype = torch.long, device = model.device).unsqueeze(0)
     inputs_embeds = model.model.embed_tokens(input_ids)
-    
-    if model.model._use_flash_attention_2:
-        attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
-    else:
-        attention_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), inputs_embeds, 0,)
+    B, N, D = input_embeds.shape
+
+    cache_position = torch.arange(0, N, device = input_embeds.device)
+    position_ids = cache_position.unsqueeze(0)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
     hidden_state = inputs_embeds
+
     all_topk_experts = []
     all_topk_weights = []
     all_pre_mlp_hidden_states = []
@@ -48,7 +50,7 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
         # Self Attention
-        hidden_state, self_attn_weights, present_key_value = layer.self_attn(hidden_states = hidden_state, attention_mask = attention_mask, position_ids = position_ids)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids)
         hidden_state = residual + hidden_state
         # Fully Connected
         residual = hidden_state
@@ -172,16 +174,16 @@ def run_dsv3_with_topk_ablation(model, input_ids, attention_mask, layers_to_abla
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
-    B, N = input_ids.shape[:2]
-    position_ids = torch.arange(0, N, dtype=torch.long, device = model.device).unsqueeze(0)
     inputs_embeds = model.model.embed_tokens(input_ids)
-    
-    if model.model._use_flash_attention_2:
-        attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
-    else:
-        attention_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), inputs_embeds, 0,)
+    B, N, D = input_embeds.shape
+
+    cache_position = torch.arange(0, N, device = input_embeds.device)
+    position_ids = cache_position.unsqueeze(0)
+    causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
+    position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
     hidden_state = inputs_embeds
+
     all_topk_experts = []
     all_topk_weights = []
     all_pre_mlp_hidden_states = []
@@ -194,7 +196,7 @@ def run_dsv3_with_topk_ablation(model, input_ids, attention_mask, layers_to_abla
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
         # Self Attention
-        hidden_state, self_attn_weights, present_key_value = layer.self_attn(hidden_states = hidden_state, attention_mask = attention_mask, position_ids = position_ids)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids)
         hidden_state = residual + hidden_state
         # Fully Connected
         residual = hidden_state
