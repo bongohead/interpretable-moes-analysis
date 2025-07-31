@@ -28,7 +28,7 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
-    inputs_embeds = model.model.embed_tokens(input_ids)
+    input_embeds = model.model.embed_tokens(input_ids)
     B, N, D = input_embeds.shape
 
     cache_position = torch.arange(0, N, device = input_embeds.device)
@@ -36,7 +36,7 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
     causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
     position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
-    hidden_state = inputs_embeds
+    hidden_state = input_embeds
 
     all_topk_experts = []
     all_topk_weights = []
@@ -50,7 +50,7 @@ def run_dsv3_return_topk(model, input_ids, attention_mask, return_hidden_states 
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
         # Self Attention
-        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         # Fully Connected
         residual = hidden_state
@@ -174,7 +174,7 @@ def run_dsv3_with_topk_ablation(model, input_ids, attention_mask, layers_to_abla
         - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
         - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
     """
-    inputs_embeds = model.model.embed_tokens(input_ids)
+    input_embeds = model.model.embed_tokens(input_ids)
     B, N, D = input_embeds.shape
 
     cache_position = torch.arange(0, N, device = input_embeds.device)
@@ -182,7 +182,7 @@ def run_dsv3_with_topk_ablation(model, input_ids, attention_mask, layers_to_abla
     causal_mask = create_causal_mask(model.model.config, input_embeds, attention_mask, cache_position, None, position_ids)
     position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
-    hidden_state = inputs_embeds
+    hidden_state = input_embeds
 
     all_topk_experts = []
     all_topk_weights = []
@@ -196,7 +196,7 @@ def run_dsv3_with_topk_ablation(model, input_ids, attention_mask, layers_to_abla
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
         # Self Attention
-        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         # Fully Connected
         residual = hidden_state
