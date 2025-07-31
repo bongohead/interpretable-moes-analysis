@@ -58,54 +58,53 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
 
         ####### GraniteMoeHybridMoE - below code replaces seltorch.nn.functional.block_sparse_moe(hidden_states) #######
         batch_size, seq_len, hidden_dim = hidden_state.shape
-        tokens = batch_size * seq_len
-        moe_hidden_state = hidden_state.view(tokens, hidden_dim)
+        moe_hidden_state = hidden_state.view(batch_size * seq_len, hidden_dim)
 
-        # 1️⃣  Router (identical to GraniteMoeHybridTopKGating)
+        # 1. Router (identical to GraniteMoeHybridTopKGating)
         (
-            index_sorted_experts, # (tokens*k,)
-            batch_index, # (tokens*k,)   token ids grouped by expert
-            batch_gates, # (tokens*k,)   softmax weights in same order
-            expert_size, # python list   tokens routed to each expert
-            router_logits, # (tokens, n_experts)
+            sorted_token_ids, # (BN * top_k,) Flat permutation indices by expert, since the BN tokens are reshaped s.t. all the tokens routed to the same expert are contiguous
+            batch_indices, # (BN * top_k,) Maps each row above back to the originating token
+            batch_softmaxes, # (BN * top_k, ) Gate values aligned with rows above
+            tokens_per_expert, # List of length E - how many tokens are routed per expert
+            router_logits, # (BN, n_experts) - Full unnormalized logits per token
         ) = layer.block_sparse_moe.router(moe_hidden_state)
 
         k = layer.block_sparse_moe.router.top_k
         # index helpers to recover rank-within-top-k
-        rank_in_topk = torch.remainder(index_sorted_experts, k)   # (tokens*k,)
+        rank_in_topk = torch.remainder(sorted_token_ids, k) # (BN * top_k,) 0 = best expert
 
-        selected_experts = router_logits.topk(k, dim = 1).indices   # (tokens, k)
-        routing_weights = torch.zeros(tokens, k, dtype = moe_hidden_state.dtype, device = moe_hidden_state.device) # (tokens, k)
-        routing_weights[batch_index, rank_in_topk] = batch_gates # scatter
-        routing_weights = routing_weights.view(batch_size * seq_len, k) # (tokens, k)
+        selected_expert_ids = router_logits.topk(k, dim = 1, sorted = True).indices # (BN, top_k)
+        selected_expert_weights = torch.zeros(batch_size * seq_len, k, dtype = moe_hidden_state.dtype, device = moe_hidden_state.device) # (BN, top_k)
+        selected_expert_weights[batch_indices, rank_in_topk] = batch_softmaxes # scatter
+        selected_expert_weights = selected_expert_weights.view(batch_size * seq_len, k) # (BN, top_k)
 
         if return_hidden_states:
-            layer_expert_outputs = torch.zeros(tokens, k, hidden_dim, dtype = moe_hidden_state.dtype, device = moe_hidden_state.device)
+            layer_expert_outputs = torch.zeros(batch_size * seq_len, k, hidden_dim, dtype = moe_hidden_state.dtype, device = moe_hidden_state.device)
 
         # 2. Gather inputs grouped by expert
-        expert_inputs = moe_hidden_state[batch_index]                  # (tokens*k, D)
+        expert_inputs = moe_hidden_state[batch_indices] # (BN*top_k, D)
 
         # 3. Expert network
-        hidden = layer.block_sparse_moe.input_linear(expert_inputs, expert_size)
-        h_act, h_g  = hidden.chunk(2, dim = -1)
+        hidden = layer.block_sparse_moe.input_linear(expert_inputs, tokens_per_expert)
+        h_act, h_g = hidden.chunk(2, dim = -1)
         hidden = layer.block_sparse_moe.activation(h_act) * h_g
-        raw_outputs = layer.block_sparse_moe.output_linear(hidden, expert_size)  # (tokens*k, D)
+        raw_outputs = layer.block_sparse_moe.output_linear(hidden, tokens_per_expert)  # (BN * top_k, D)
 
-        # keep a copy **before** weighting for diagnostics
+        # Save before scaling for diagnostics
         if return_hidden_states:
-            layer_expert_outputs[batch_index, rank_in_topk] = raw_outputs.detach()
+            layer_expert_outputs[batch_indices, rank_in_topk] = raw_outputs.detach()
 
         # 4️. Apply routing prob and scatter-add once
-        weighted = raw_outputs * batch_gates[:, None]
-        final_flat = torch.zeros_like(moe_hidden_state) # (tokens, D)
-        final_flat.index_add_(0, batch_index, weighted)
+        weighted = raw_outputs * batch_softmaxes[:, None]
+        final_flat = torch.zeros_like(moe_hidden_state) # (BN, D)
+        final_flat.index_add_(0, batch_indices, weighted)
 
         final_hidden_states = final_flat.view(batch_size, seq_len, hidden_dim)
         #######
         hidden_state = residual + (final_hidden_states + layer.shared_mlp(hidden_state)) * layer.residual_multiplier
 
-        all_topk_experts.append(selected_experts.detach().cpu())
-        all_topk_weights.append(routing_weights.detach().cpu().to(torch.float32))
+        all_topk_experts.append(selected_expert_ids.detach().cpu())
+        all_topk_weights.append(selected_expert_weights.detach().cpu().to(torch.float32))
 
         if return_hidden_states:
             all_router_logits.append(router_logits.detach().cpu())

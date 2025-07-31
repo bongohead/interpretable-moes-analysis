@@ -44,7 +44,7 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
         # SA
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
-        hidden_state, _, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
@@ -152,7 +152,7 @@ def run_olmoe_with_topk_ablation(model, input_ids, attention_mask, layers_to_abl
         # SA
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
-        hidden_state, _, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
