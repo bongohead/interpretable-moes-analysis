@@ -1,7 +1,7 @@
 pip install --upgrade jupyterlab ipywidgets jupyterlab-widgets
 pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu124
 pip install bitsandbytes==0.46.1
-pip install transformers==4.54.1
+pip install transformers==4.55.0
 pip install accelerate==1.9.0
 pip install plotly.express
 pip install wandb
@@ -20,6 +20,8 @@ pip install tiktoken blobfile # For Deepseek-based architectures
 pip install mamba-ssm==2.2.5 # Dependency for Granite
 pip install causal-conv1d==1.5.2 # Dependency for Mamba
 pip install compressed-tensors # Dependency for 8bit Glm4.5
+pip install kernels # As of Aug 2025, dep for GPT-OSS (supports flash attention 3 sinks)
+pip install --no-binary :all: git+https://github.com/triton-lang/triton.git@main#subdirectory=python/triton_kernels # As of Aug 2025, dep for GPT-OSS (supports MXFP4) 
 
 # CUDA-based ML https://docs.rapids.ai/install/
 pip install \
@@ -27,5 +29,5 @@ pip install \
     "cudf-cu12==25.6.*" "cuml-cu12==25.6.*"
 
 # Misc
-pip install flash-attn==2.8.1 --no-build-isolation
-pip install triton==3.3.1
+pip install flash-attn==2.8.2 --no-build-isolation
+pip install triton==3.4.0
