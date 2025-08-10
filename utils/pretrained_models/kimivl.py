@@ -14,21 +14,21 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
     """
     Params:
         @model: A model of class `KimiVLForConditionalGeneration`.
-        @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
-        @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
-        @pixel_values:  A L x 3 x P x P tensor of image processor vision patches, only pass for image inputs.
-        @image_grid_hws: A L_img x 2 tensor with (H, W) grids for each encoded image, only pass for image inputs.
-        @return_hidden_states: Boolean; whether to return hidden_states themselves.
+        @input_ids: A (B, N) tensor of inputs IDs on the same device as `model`.
+        @attention_mask: A (B, N) tensor of mask indicators on the same device as `model`.
+        @pixel_values:  A (L, 3, P, P) tensor of image processor vision patches, only pass for image inputs.
+        @image_grid_hws: A (L_img, 2) tensor with H - W grids for each encoded image, only pass for image inputs.
+        @return_hidden_states: Boolean; whether to return optional outputs below.
 
     Returns:
         A dictionary with keys:
-        - `logits`: The standard B x N x V LM output
-        - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs
-        - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights
-        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
-        - `all_router_logits: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x n_experts tensor of router logits
-        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
-        - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
+        - `logits`: (B, N, V) LM outputs
+        - `all_topk_experts`: List (len = # MoE layers) of (BN, topk) expert IDs tensors
+        - `all_topk_weights`: List (len = # MoE layers) of (BN, topk) expert weight tensors
+        - `all_pre_mlp_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) pre-MLP activations
+        - `all_router_logits: (optional) List (len = # MoE layers) of (BN, n_experts) router *logits*
+        - `all_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) post-layer activations
+        - `all_expert_outputs`: (optional) List (len = # MoE layers) of (BN, topk, D) pre-weighting expert outputs
     """
     lang_model = model.language_model
     B, N = input_ids.shape[:2]

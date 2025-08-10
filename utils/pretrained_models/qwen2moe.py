@@ -11,19 +11,19 @@ def run_qwen2moe_return_topk(model, input_ids, attention_mask, return_hidden_sta
     """
     Params:
         @model: A model of class `Qwen2MoeForCausalLM`.
-        @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
-        @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
-        @return_hidden_states: Boolean; whether to return hidden_states themselves.
+        @input_ids: A (B, N) tensor of inputs IDs on the same device as `model`.
+        @attention_mask: A (B, N) tensor of mask indicators on the same device as `model`.
+        @return_hidden_states: Boolean; whether to return optional outputs below.
 
     Returns:
         A dictionary with keys:
-        - `logits`: The standard B x N x V LM output
-        - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs
-        - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights
-        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
-        - `all_router_logits: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x n_experts tensor of router logits
-        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
-        - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
+        - `logits`: (B, N, V) LM outputs
+        - `all_topk_experts`: List (len = # MoE layers) of (BN, topk) expert IDs tensors
+        - `all_topk_weights`: List (len = # MoE layers) of (BN, topk) expert weight tensors
+        - `all_pre_mlp_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) pre-MLP activations
+        - `all_router_logits: (optional) List (len = # MoE layers) of (BN, n_experts) router *logits*
+        - `all_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) post-layer activations
+        - `all_expert_outputs`: (optional) List (len = # MoE layers) of (BN, topk, D) pre-weighting expert outputs
     """
     input_embeds = model.model.embed_tokens(input_ids)
     
@@ -118,8 +118,8 @@ def run_qwen2moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
     """
     Params:
         @model: A model of class `Qwen2MoeForCausalLM`.
-        @input_ids: A B x N tensor of inputs IDs on the same device as `model`.
-        @attention_mask: A B x N tensor of mask indicators on the same device as `model`.
+        @input_ids: A (B, N) tensor of inputs IDs on the same device as `model`.
+        @attention_mask: A (B, N) tensor of mask indicators on the same device as `model`.
         @layers_to_ablate: A list of layer indices (0-indexed) for which experts will be ablated.
         @topk_to_ablate: A list of topk indices (0-indexed) for which experts will be ablated and replaced by zeros.
         @renorm: Whether to renormalize the sum of expert weights after ablation, to scale the post-ablation expert weight sum to the original expert weight sum.
@@ -127,13 +127,13 @@ def run_qwen2moe_with_topk_ablation(model, input_ids, attention_mask, layers_to_
 
     Returns:
         A dictionary with keys:
-        - `logits`: The standard B x N x V LM output
-        - `all_topk_experts`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert IDs. Returns tthe pre-ablation topk experts.
-        - `all_topk_weights`: A list of length equal to the number of MoE layers, with each element a BN x topk tensor of expert weights. Returns the post-ablation weights.
-        - `all_pre_mlp_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of pre-MLP hidden states
-        - `all_router_logits: A list of length equal to the number of MoE layers, with each element a BN x n_experts tensor of router logits. Returns the pre-ablation logits.
-        - `all_hidden_states`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x D tensor of post-layer hidden states
-        - `all_expert_outputs`: If return_hidden_states, a list of length equal to the number of MoE layers, with each element a BN x topk x D tensor of expert outputs (pre-weighting)
+        - `logits`: (B, N, V) LM outputs
+        - `all_topk_experts`: List (len = # MoE layers) of (BN, topk) expert IDs tensors. Returns the *pre-ablation* topk experts.
+        - `all_topk_weights`: List (len = # MoE layers) of (BN, topk) expert weight tensors. Returns the *post-ablation* weights.
+        - `all_pre_mlp_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) pre-MLP activations.
+        - `all_router_logits: (optional) List (len = # MoE layers) of (BN, n_experts) router *logits*. Returns the *pre-ablation* logits.
+        - `all_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) post-layer activations. 
+        - `all_expert_outputs`: (optional) List (len = # MoE layers) of (BN, topk, D) pre-weighting expert outputs
     """
     input_embeds = model.model.embed_tokens(input_ids)
     
