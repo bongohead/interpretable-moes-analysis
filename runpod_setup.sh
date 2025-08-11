@@ -18,7 +18,7 @@ apt-get install -y python3.12-dev
 # Set Python 3.12 as the default python
 update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
-# Install python3.12-venv
+# Install venv
 apt install -y python3.12-venv
 
 # Ensure pip is up to date for Python
