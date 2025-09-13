@@ -1,9 +1,9 @@
 # Core
 pip install --upgrade jupyterlab ipywidgets jupyterlab-widgets
-pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
-pip install bitsandbytes==0.46.1
-pip install pip install --upgrade "git+https://github.com/huggingface/transformers.git"
-pip install accelerate==1.10.0
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+pip install transformers==4.56.1
+# pip install pip install --upgrade "git+https://github.com/huggingface/transformers.git"
+pip install accelerate==1.10.1
 pip install pandas
 pip install tqdm
 pip install datasets
@@ -22,12 +22,12 @@ pip install kaleido
 pip install tiktoken blobfile # For Deepseek-based architectures 
 pip install kernels # As of Aug 2025, dep for GPT-OSS (supports flash attention 3 sinks)
 # pip install --no-binary :all: git+https://github.com/triton-lang/triton.git@main#subdirectory=python/triton_kernels # As of Aug 2025, dep for GPT-OSS (supports MXFP4)  - no longerneeded with beta transformers version
-# pip install compressed-tensors # Dependency for 8bit Glm4.5
+pip install compressed-tensors # Dependency for 8bit Glm4.5
 # pip install -v mamba-ssm==2.2.5 # Dependency for Granite
 # pip install -v causal-conv1d==1.5.2 # Dependency for Mamba
 
 # Misc
-pip install flash-attn==2.8.2 --no-build-isolation
+pip install flash-attn==2.8.3 --no-build-isolation
 pip install triton==3.4.0
 
 # CUDA-based ML https://docs.rapids.ai/install/
