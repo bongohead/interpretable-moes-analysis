@@ -1,4 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -eu pipefail
+
+if [ -z "${VENV:-}" ]; then
+  . .venv/bin/activate
+fi
 
 # Jupyter
 pip install --upgrade jupyterlab ipywidgets jupyterlab-widgets

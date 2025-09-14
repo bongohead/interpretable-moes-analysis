@@ -1,9 +1,7 @@
 #!/bin/bash
-# These are APT updates needed for use on Runpod
 
 # Update & upgrade system packages
-apt update -y \
-&& apt upgrade -y
+apt update -y && apt upgrade -y
 
 # Install nano
 apt install -y nano
