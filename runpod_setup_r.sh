@@ -21,14 +21,14 @@ R -e "install.packages('IRkernel', Ncpus = 8); IRkernel::installspec(user = FALS
 
 jupyter kernelspec list
 
-apt-get install -y libxml2-dev libfontconfig1-dev libcurl4-openssl-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev libssl-dev 
+apt-get install -y libxml2-dev libfontconfig1-dev libcurl4-openssl-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev libwebp-dev libssl-dev
 R -e "install.packages('tidyverse', Ncpus = 8);"
 R -e "install.packages('data.table', Ncpus = 8);"
 R -e "install.packages('slider', Ncpus = 8);"
 
 # Fonts for plotting
 apt install fonts-cmu 
-R -e "install.packages('extrafont', Ncpus = 8);"
+R -e "install.packages('showtext', Ncpus = 8);"
 R -e "install.packages('svglite', Ncpus = 8);"
 R -e "install.packages('ggtext', Ncpus = 8);"
 

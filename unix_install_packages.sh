@@ -21,7 +21,6 @@ pip install plotly.express pandas kaleido nbformat
 pip install python-dotenv pyyaml tqdm termcolor
 pip install wandb
 pip install datasets
-plotly_get_chrome -y
 
 # CUDA-based ML https://docs.rapids.ai/install/
 pip install --extra-index-url=https://pypi.nvidia.com "cudf-cu12==25.8.*" "cuml-cu12==25.8.*"
