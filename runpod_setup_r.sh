@@ -27,7 +27,7 @@ R -e "install.packages('data.table', Ncpus = 8);"
 R -e "install.packages('slider', Ncpus = 8);"
 
 # Fonts for plotting
-apt install fonts-cmu 
+apt install fonts-texgyre
 R -e "install.packages('showtext', Ncpus = 8);"
 R -e "install.packages('svglite', Ncpus = 8);"
 R -e "install.packages('ggtext', Ncpus = 8);"
