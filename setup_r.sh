@@ -23,30 +23,21 @@ jupyter kernelspec list
 
 apt-get install -y libxml2-dev libfontconfig1-dev libcurl4-openssl-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev libwebp-dev libssl-dev
 R -e "install.packages('tidyverse', Ncpus = 8);"
-R -e "install.packages('data.table', Ncpus = 8);"
+R -e "install.packages('patchwork', Ncpus = 8);"
 R -e "install.packages('slider', Ncpus = 8);"
+R -e "install.packages('zoo', Ncpus = 8);"
+R -e "install.packages('arrow', Ncpus = 8);"
+
+# Visualizations for paths
+# apt get install -y pandoc
+# R -e "install.packages('reticulate', Ncpus = 8);"
+# R -e "install.packages('highcharter', Ncpus = 8);"
 
 # Fonts for plotting
-apt install fonts-texgyre
+apt install -y fonts-texgyre
 R -e "install.packages('showtext', Ncpus = 8);"
 R -e "install.packages('svglite', Ncpus = 8);"
 R -e "install.packages('ggtext', Ncpus = 8);"
 
 # Fix issue with list-cols not displaying
 R -e "install.packages('remotes'); remotes::install_github('IRkernel/repr'); IRkernel::installspec()"
-
-# Rstudio setup - need to expose port 8887 in runpod TCP
-# apt-get install -y gdebi-core
-# wget https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2025.05.0-496-amd64.deb
-# apt-get update -qq
-# apt-get install -y ./rstudio-server-2025.05.0-496-amd64.deb
-# rm ./rstudio-server-2025.05.0-496-amd64.deb
-
-# useradd -m rstudio
-# passwd rstudio
-
-# echo "www-port=8887" >> /etc/rstudio/rserver.conf
-# systemctl enable --now rstudio-server
-
-# # Make sure it's up
-# ss -ltnp | grep 8887
