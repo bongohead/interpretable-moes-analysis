@@ -24,14 +24,21 @@ class ReconstructableTextDataset(Dataset):
                 shuffle = False,
                 collate_fn = collate_fn
             )
-        """        
+        """
+        if getattr(tokenizer, 'backend', None) == 'tokenizers': # For transformers v5, all tokenizer = backend supports fast toks
+            supports_offset = True
+        elif getattr(tokenizer, 'is_fast', False): # Backwards compat for transformers v4
+            supports_offset = True
+        else:
+            supports_offset = False
+
         tokenized = tokenizer(
             raw_texts,
             add_special_tokens = False,
             max_length = max_length,
             padding = 'max_length',
             truncation = True,
-            return_offsets_mapping = getattr(tokenizer, 'is_fast', False), # True for fast tokenizers
+            return_offsets_mapping = supports_offset,
             return_tensors = 'pt'
         )
 
@@ -66,15 +73,40 @@ class ReconstructableTextDataset(Dataset):
 
         # General path for fast tokenizers
         if self.offset_mapping is not None:
-            for i in range(0, self.input_ids.shape[0]):
-                token_substrings = []
-                for j in range(self.input_ids.shape[1]): 
-                    start_char, end_char = self.offset_mapping[i][j].tolist()
-                    if start_char == 0 and end_char == 0: # When pads, offset_mapping might be [0, 0], so let's store an empty string for those positions.
-                        token_substrings.append("")
-                    else:
-                        token_substrings.append(texts[i][start_char:end_char])
 
+            # # Use below vesrion instead, which supports non-ASCII charactesr (since 1 char != 1 byte for those)
+            # for i in range(0, self.input_ids.shape[0]):
+            #     token_substrings = []
+            #     for j in range(self.input_ids.shape[1]): 
+            #         start_char, end_char = self.offset_mapping[i][j].tolist()
+            #         if start_char == 0 and end_char == 0: # When pads, offset_mapping might be [0, 0], so let's store an empty string for those positions.
+            #             token_substrings.append("")
+            #         else:
+            #             token_substrings.append(texts[i][start_char:end_char])
+            #     all_token_substrings.append(token_substrings)
+
+            # Dedupe overlapping offsets: Some tokenizers (e.g., Qwen's byte-level BPE) report
+            # overlapping character spans for multi-byte chars like emojis. Without dedupe,
+            # text[10:11] three times → "🧸🧸🧸". This tracks `last_end` (furthest char emitted)
+            # and only emit chars past that point, so each character appears exactly once.
+            # Row count is unchanged—one row per token ID—only the `token` string changes.
+            for i in range(self.input_ids.shape[0]):
+                text = texts[i]
+                offsets = [tuple(map(int, pair.tolist())) for pair in self.offset_mapping[i]]
+                token_substrings = []
+                last_end = 0  # furthest char index we've emitted
+                for (start, end) in offsets:
+                    if start == 0 and end == 0:  # padding
+                        token_substrings.append("")
+                        continue
+                    # Only emit chars past what we've already emitted
+                    emit_start = max(start, last_end)
+                    if emit_start >= end:
+                        token_substrings.append("")  # nothing new
+                    else:
+                        token_substrings.append(text[emit_start:end])
+                    last_end = max(last_end, end)
+                    
                 all_token_substrings.append(token_substrings)
 
         # Tiktoken tokenizers

@@ -4,7 +4,7 @@ Reversed engineered forward pass for Qwen
 - See https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_moe/modeling_qwen2_moe.py
 """
 import torch
-from ._pretrained_helpers import _sort_gate_tensors
+from .._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
 def run_qwen2moe_return_topk(model, input_ids, attention_mask, return_hidden_states = False):
