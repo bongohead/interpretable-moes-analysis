@@ -22,9 +22,13 @@ __pycache__
 *.db
 *.pt
 *.pkl
+*.feather
+*.safetensors
 
 # Web
 *.html
 
 # Images
 **/exports/*
+
+activations/**
