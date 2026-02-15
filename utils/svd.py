@@ -1,5 +1,28 @@
 import torch
 
+def get_svd_proj(target_tensor: torch.Tensor, svd_tol: float = 1e-6) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Return SVD projection matrix
+
+    Params:
+        @target_tensor: Target tensor of shape (., D). If a routing gate, a tensor of shape (n_experts, D) representing the linear router gate weights for the layer.
+        @svd_tol: Tolerance for determining non-zero singular values in SVD to establish the matrix rank.
+
+    Returns:
+
+    """
+    U, S, Vt = torch.linalg.svd(target_tensor, full_matrices = False) # Use full_matrices = False for efficiency if D > n_experts
+
+    rank = int((S > svd_tol * S[0]).sum().item())
+    if rank == 0:
+        raise Exception('Router weights matrix has rank 0 according to tolerance.')
+    
+    Ur = U[:, :rank].contiguous() # E x r
+    Sr = S[:rank].contiguous() # r
+    Vr = Vt[:rank, :].T.contiguous() # D x r
+
+    return Ur, Sr, Vr
+
 def decompose_orthogonal(hidden_states: torch.Tensor, target_tensor: torch.Tensor, method: str = 'svd', svd_tol: float = 1e-6) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Decomposes hidden states into components parallel and orthogonal to the target tensor. The target tensor can be either a routing gate or the MLP operation.
