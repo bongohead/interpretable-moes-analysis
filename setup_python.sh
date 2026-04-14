@@ -56,13 +56,13 @@ fi
 
 
 # ---------- 3. Install packages ----------
-uv pip install --python "$VENV_DIR/bin/python" --index-url https://download.pytorch.org/whl/cu128 torch==2.9.1
+uv pip install --python "$VENV_DIR/bin/python" --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
 
 uv pip install --python "$VENV_DIR/bin/python" \
-  transformers==5.0.0 hf_transfer==0.1.9 accelerate==1.12.0 triton==3.5.1 \
-  tiktoken==0.12.0 blobfile==3.1.0 kernels==0.11.5 \
-  compressed-tensors==0.13.0 \
-  mamba-ssm==2.3.0 causal-conv1d==1.6.0 \
+  transformers==5.5.3 hf_transfer==0.1.9 accelerate==1.13.0 triton==3.6.0 \
+  tiktoken==0.12.0 blobfile==3.2.0 kernels==0.13.0 \
+  compressed-tensors==0.15.0.1 \
+  mamba-ssm==2.3.1 causal-conv1d==1.6.1 \
   plotly pandas kaleido python-dotenv pyyaml tqdm termcolor\
   datasets
 
@@ -77,12 +77,14 @@ apt update && apt-get install libnss3 libatk-bridge2.0-0 libcups2 libxcomposite1
 # uv pip install --python "$VENV_DIR/bin/python" --only-binary=:all: flash-attn==2.8.3 # Only use prebuilt wheels
 # uv pip install --python "$VENV_DIR/bin/python" flash-attn==2.8.3 --no-build-isolation # Allow build
 # FA_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
-FA_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3+cu128torch2.9-cp312-cp312-linux_x86_64.whl"
+# FA_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3+cu128torch2.9-cp312-cp312-linux_x86_64.whl"
+FA_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.6.3+cu128torch2.11-cp312-cp312-linux_x86_64.whl"
 uv pip install --python "$VENV_DIR/bin/python" "$FA_URL"
 
 # RAPIDS (search NVIDIA index for cudf/cuML — PyPI/extra index support is documented)
-uv pip install --python "$VENV_DIR/bin/python" libucx-cu12==1.18.1 ucx-py-cu12==0.45.0 # Dependencies from pypi for RAPIDS - install separately to avoid error
-uv pip install --python "$VENV_DIR/bin/python" --extra-index-url https://pypi.nvidia.com "cudf-cu12==25.12.*" "cuml-cu12==25.12.*" #
+# uv pip install --python "$VENV_DIR/bin/python" libucx-cu12==1.18.1 ucx-py-cu12==0.45.0 # Dependencies from pypi for RAPIDS - install separately to avoid error
+# uv pip install --python "$VENV_DIR/bin/python" --extra-index-url https://pypi.nvidia.com "cudf-cu12==25.12.*" "cuml-cu12==25.12.*" #
+uv pip install --python "$VENV_DIR/bin/python" --extra-index-url https://pypi.nvidia.com "cudf-cu12==26.4.*" "cuml-cu12==26.4.*" 
 
 # ---------- 4. Setup Jupyter ----------
 # Jupyter (server + kernel + widgets + nbformat)
@@ -91,10 +93,9 @@ uv pip install --python "$VENV_DIR/bin/python" jupyterlab jupyter_server ipykern
 # Jupyter kernel (visible to any server)
 "$VENV_DIR/bin/python" -m ipykernel install --user --name "$KERNEL_NAME" --display-name "MoEs (uv)"
 
-
 # ---------- 5. Add import paths ----------
 SITE_DIR="$("$VENV_DIR/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 printf "%s\n" "$PROJECT_DIR" > "$SITE_DIR/add_path_analysis.pth"
 
 # Final
-echo "Done. Kernel: $KERNEL_NAME  |  Python: $("$VENV_DIR/bin/python" -V)"
+echo "Done. Kernel: $KERNEL_NAMEp  |  Python: $("$VENV_DIR/bin/python" -V)"
