@@ -33,7 +33,7 @@ def run_gptoss_return_topk(model, input_ids, attention_mask, return_hidden_state
     cache_position = torch.arange(0, N, device = input_embeds.device)
     position_ids = cache_position.unsqueeze(0)
     # Build both masks; each layer picks one via `attention_type`
-    mask_kwargs = {'config': model.model.config, 'input_embeds': input_embeds, 'attention_mask': attention_mask, 'cache_position': cache_position, 'past_key_values': None}
+    mask_kwargs = {'config': model.model.config, 'inputs_embeds': input_embeds, 'attention_mask': attention_mask, 'cache_position': cache_position, 'past_key_values': None}
     causal_mask_mapping = {
         'full_attention': create_causal_mask(**mask_kwargs),
         'sliding_attention': create_sliding_window_causal_mask(**mask_kwargs)
@@ -53,7 +53,7 @@ def run_gptoss_return_topk(model, input_ids, attention_mask, return_hidden_state
         # SA with sinks
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
-        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask_mapping[layer.attention_type], position_ids = position_ids, position_embeddings = position_embeddings)
+        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask_mapping[model.model.config.layer_types[layer_ix]], position_ids = position_ids, position_embeddings = position_embeddings)
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
