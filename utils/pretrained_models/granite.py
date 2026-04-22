@@ -1,8 +1,9 @@
 """
 Reversed engineered forward pass for IBM Granite-4.0-Tiny Models
-- Supports Granite-4.0 Tiny Preview
+- Supports Granite-4.0-Tiny/ Granite-4.0-TinyPreview
 """
 import torch
+from transformers.masking_utils import create_causal_mask
 from ._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
@@ -24,12 +25,19 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
         - `all_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) post-layer activations
         - `all_expert_outputs`: (optional) List (len = # MoE layers) of (BN, topk, D) pre-weighting expert outputs
     """
-    input_embeds = model.model.embed_tokens(input_ids) * model.config.embedding_multiplier
+    input_embeds = model.model.embed_tokens(input_ids)
+    input_embeds = input_embeds * model.model.embedding_multiplier
 
-    cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
-    position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, output_attentions = False)
-    mamba_mask = model.model._update_mamba_mask(attention_mask, cache_position)
+    position_ids = torch.arange(0, input_embeds.shape[1], device = input_embeds.device).unsqueeze(0)
+
+    causal_mask = create_causal_mask(
+        config = model.model.config,
+        inputs_embeds = input_embeds,
+        attention_mask = attention_mask,
+        past_key_values = None,
+    )
+    mamba_mask = model.model._update_mamba_mask(attention_mask, None)
+
     position_embeddings = model.model.rotary_emb(input_embeds, position_ids) if model.model.rotary_emb is not None else None
 
     hidden_state = input_embeds
@@ -42,21 +50,34 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
     all_expert_outputs = []
 
     for layer_ix, layer in enumerate(model.model.layers):
-        # SA
+        # SA / Mamba
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
         if layer.layer_type == 'mamba':
-            hidden_state = layer.mamba(hidden_states = hidden_state, attention_mask = mamba_mask)
+            hidden_state = layer.mamba(
+                hidden_states = hidden_state,
+                cache_params = None,
+                attention_mask = mamba_mask
+            )
         else:
-            hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_embeddings = position_embeddings)
+            hidden_state, _ = layer.self_attn(
+                hidden_states = hidden_state,
+                attention_mask = causal_mask,
+                past_key_values = None,
+                position_embeddings = position_embeddings
+            )
         hidden_state = residual + hidden_state * layer.residual_multiplier
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
 
+        if not layer.has_experts:
+            hidden_state = residual + layer.shared_mlp(hidden_state) * layer.residual_multiplier
+            continue
+
         if return_hidden_states:
             all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
-        ####### GraniteMoeHybridMoE - below code replaces seltorch.nn.functional.block_sparse_moe(hidden_states) #######
+        ####### GraniteMoeHybridMoE - below code replaces layer.block_sparse_moe(hidden_state) #######
         batch_size, seq_len, hidden_dim = hidden_state.shape
         moe_hidden_state = hidden_state.view(batch_size * seq_len, hidden_dim)
 
@@ -101,6 +122,7 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
 
         final_hidden_states = final_flat.view(batch_size, seq_len, hidden_dim)
         #######
+
         hidden_state = residual + (final_hidden_states + layer.shared_mlp(hidden_state)) * layer.residual_multiplier
 
         all_topk_experts.append(selected_expert_ids.detach().cpu())
@@ -123,5 +145,3 @@ def run_granite_return_topk(model, input_ids: torch.LongTensor, attention_mask: 
         'all_hidden_states': all_hidden_states,
         'all_expert_outputs': all_expert_outputs
     }
-
-

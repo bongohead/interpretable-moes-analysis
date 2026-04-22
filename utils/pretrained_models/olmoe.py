@@ -3,6 +3,7 @@ Reversed engineered forward pass for OlMoE
 - See https://github.com/huggingface/transformers/blob/main/src/transformers/models/olmoe/modeling_olmoe.py
 """
 import torch
+from transformers.masking_utils import create_causal_mask
 from ._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
@@ -26,9 +27,15 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
     """
     input_embeds = model.model.embed_tokens(input_ids)
     
-    cache_position = torch.arange(0, input_embeds.shape[1], device = input_embeds.device)
-    position_ids = cache_position.unsqueeze(0)
-    causal_mask = model.model._update_causal_mask(attention_mask, input_embeds, cache_position, None, None)
+    position_ids = torch.arange(0, input_embeds.shape[1], device = input_embeds.device).unsqueeze(0)
+
+    causal_mask = create_causal_mask(
+        config = model.model.config,
+        inputs_embeds = input_embeds,
+        attention_mask = attention_mask,
+        past_key_values = None,
+        position_ids = position_ids,
+    )
 
     hidden_state = input_embeds
     position_embeddings = model.model.rotary_emb(hidden_state, position_ids)
@@ -44,7 +51,13 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
         # SA
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
-        hidden_state, _ = layer.self_attn(hidden_states = hidden_state, attention_mask = causal_mask, position_ids = position_ids, position_embeddings = position_embeddings)
+        hidden_state, _ = layer.self_attn(
+            hidden_states = hidden_state,
+            attention_mask = causal_mask,
+            position_ids = position_ids,
+            past_key_values = None,
+            position_embeddings = position_embeddings
+        )
         hidden_state = residual + hidden_state
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
@@ -55,12 +68,7 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
         batch_size, sequence_length, hidden_dim = hidden_state.shape
         moe_hidden_state = hidden_state.view(-1, hidden_dim)
 
-        router_logits = torch.nn.functional.linear(moe_hidden_state, layer.mlp.gate.weight) # Size (BN, n_experts)
-        router_logits = torch.nn.functional.softmax(router_logits, dim = 1, dtype = torch.float)
-        routing_weights, selected_experts = torch.topk(router_logits, layer.mlp.gate.top_k, dim = -1, sorted = True)
-        if layer.mlp.gate.norm_topk_prob:
-            routing_weights /= routing_weights.sum(dim = -1, keepdim = True)
-        routing_weights = routing_weights.to(router_logits.dtype)
+        router_logits, routing_weights, selected_experts = layer.mlp.gate(moe_hidden_state) # Size (BN, n_experts), (BN, topk), (BN, topk)
 
         final_hidden_states = torch.zeros((batch_size * sequence_length, hidden_dim), dtype = hidden_state.dtype, device = hidden_state.device)
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes = layer.mlp.experts.num_experts).permute(2, 1, 0)
@@ -69,7 +77,12 @@ def run_olmoe_return_topk(model, input_ids, attention_mask, return_hidden_states
             layer_expert_outputs = torch.zeros((batch_size * sequence_length, layer.mlp.gate.top_k, hidden_dim), dtype = moe_hidden_state.dtype, device = moe_hidden_state.device) # BN x topk x D
 
         # Loop over all available experts in the model and perform the computation on each expert
-        for expert_idx in range(layer.mlp.experts.num_experts):
+        expert_hit = torch.greater(expert_mask.sum(dim = (-1, -2)), 0).nonzero()
+        for expert_idx in expert_hit:
+            expert_idx = expert_idx[0]
+            if expert_idx == layer.mlp.experts.num_experts:
+                continue
+
             idx, top_x = torch.where(expert_mask[expert_idx])
 
             current_state = moe_hidden_state[None, top_x].reshape(-1, hidden_dim)
