@@ -41,8 +41,9 @@ def get_supported_model_metadata(model_prefix):
         'ring-mini-2.0': ('inclusionAI/Ring-mini-2.0', 'ringmini2', None, False, 19, 1),
         'glm-4.5-air': ('zai-org/GLM-4.5-Air-FP8', 'glm4moe', None, True, 45, 1),
         'glm-4.7-flash': ('zai-org/GLM-4.7-Flash', 'glm4moelite', None, True, 46, 1),
-        'gemma-4-26b-a4b': ('google/gemma-4-26B-A4B', 'gemma4', None, True, 30, 0),
+        'gemma-4-26b-a4b': ('google/gemma-4-26B-A4B-it', 'gemma4', None, True, 30, 0),
         'qwen3.5-35b-a3b': ('Qwen/Qwen3.5-35B-A3B', 'qwen35moe', None, True, 40, 0),
+        'qwen3.6-35b-a3b': ('Qwen/Qwen3.6-35B-A3B', 'qwen35moe', None, True, 40, 0),
         'lfm2-8b-a1b': ('LiquidAI/LFM2-8B-A1B', 'lfm2moe', None, True, 22, 2),
         'lfm2-24b-a2b': ('LiquidAI/LFM2-24B-A2B', 'lfm2moe', None, True, 38, 2),
         # 'nemotron-3-nano-30b-a3b': ('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16', 'nemotron3nano', None, True, 40, 0), # Unsupported
