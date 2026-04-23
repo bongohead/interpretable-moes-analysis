@@ -59,7 +59,7 @@ fi
 uv pip install --python "$VENV_DIR/bin/python" --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
 
 uv pip install --python "$VENV_DIR/bin/python" \
-  transformers==5.5.3 hf_transfer==0.1.9 accelerate==1.13.0 triton==3.6.0 \
+  transformers==5.6.2 hf_transfer==0.1.9 accelerate==1.13.0 triton==3.6.0 \
   tiktoken==0.12.0 blobfile==3.2.0 kernels==0.13.0 \
   compressed-tensors==0.15.0.1 \
   mamba-ssm==2.3.1 causal-conv1d==1.6.1 \
