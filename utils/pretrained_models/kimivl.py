@@ -4,9 +4,11 @@ Reversed engineered forward pass for Kimi-VL models
 - See https://huggingface.co/moonshotai/Kimi-VL-A3B-Instruct/blob/main/modeling_kimi_vl.py
 - This is VERY similar to the original Deepseek v3. Only changes are an initial section to join image data into the input embeddings, and switching `model`
    to `model.language_model`.
+- Tested on transformers v5.6.2; see utils/README.md
 """
 import torch
-from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+# from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+from transformers.masking_utils import create_causal_mask
 from ._pretrained_helpers import _sort_gate_tensors
 
 @torch.no_grad()
@@ -42,16 +44,22 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
         inputs_embeds = inputs_embeds.to(image_feats.dtype)
         inputs_embeds = model._merge_with_image_features(inputs_embeds, input_ids, image_feats)
 
-    use_flash_attention_2 = getattr(
-        lang_model.model,
-        '_use_flash_attention_2',
-        getattr(lang_model.model.config, '_attn_implementation', None) == 'flash_attention_2'
-    )
+    # Removed for transformers v5 support
+    # use_flash_attention_2 = getattr(
+    #     lang_model.model,
+    #     '_use_flash_attention_2',
+    #     getattr(lang_model.model.config, '_attn_implementation', None) == 'flash_attention_2'
+    # )
+    # if use_flash_attention_2:
+    #     attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
+    # else:
+    #     attention_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), inputs_embeds, 0,)
 
-    if use_flash_attention_2:
+    if lang_model.model._use_flash_attention_2:
         attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
     else:
-        attention_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), inputs_embeds, 0,)
+        attention_mask = create_causal_mask(lang_model.model.config, inputs_embeds = inputs_embeds, attention_mask = attention_mask, past_key_values = None, position_ids = position_ids)
+
 
     hidden_state = inputs_embeds
     all_topk_experts = []
