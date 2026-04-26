@@ -1,11 +1,13 @@
 """
 Reversed engineered forward pass for Qwen
 - Supports Ring-mini-2.0
+- Tested on transformers v5.6.2; see utils/README.md
 - See https://huggingface.co/inclusionAI/Ring-mini-2.0/blob/main/modeling_bailing_moe_v2.py
 """
 import torch
-from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa
+# from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa
 from ._pretrained_helpers import _sort_gate_tensors
+from transformers.masking_utils import create_causal_mask
 
 @torch.no_grad()
 def run_ringmini2_return_topk(model, input_ids, attention_mask, return_hidden_states=False):
@@ -30,12 +32,17 @@ def run_ringmini2_return_topk(model, input_ids, attention_mask, return_hidden_st
     B, N, D = input_embeds.shape
 
     position_ids = torch.arange(0, N, device=input_embeds.device).unsqueeze(0)  # (1, N)
+    # Removed for transformers v5 support
+    # if getattr(model.model, '_use_flash_attention_2', False):  # FA2 path expects a 2D padding mask or None
+    #     causal_mask = attention_mask if (attention_mask is not None and (attention_mask == 0).any()) else None
+    # elif getattr(model.model, '_use_sdpa', False):
+    #     causal_mask = _prepare_4d_causal_attention_mask_for_sdpa(attention_mask, (B, N), input_embeds, 0)
+    # else:
+    #     causal_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), input_embeds, 0)
     if getattr(model.model, '_use_flash_attention_2', False):  # FA2 path expects a 2D padding mask or None
         causal_mask = attention_mask if (attention_mask is not None and (attention_mask == 0).any()) else None
-    elif getattr(model.model, '_use_sdpa', False):
-        causal_mask = _prepare_4d_causal_attention_mask_for_sdpa(attention_mask, (B, N), input_embeds, 0)
     else:
-        causal_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), input_embeds, 0)
+        causal_mask = create_causal_mask(model.model.config, inputs_embeds = input_embeds, attention_mask = attention_mask, past_key_values = None, position_ids = position_ids)
     position_embeddings = model.model.rotary_emb(input_embeds, position_ids)
 
     hidden_state = input_embeds

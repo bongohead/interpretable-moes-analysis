@@ -32,8 +32,8 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
     """
     lang_model = model.language_model
     B, N = input_ids.shape[:2]
-    position_ids = torch.arange(0, N, dtype=torch.long, device = model.device).unsqueeze(0)
     inputs_embeds = lang_model.model.embed_tokens(input_ids)
+    position_ids = torch.arange(0, N, dtype=torch.long, device = inputs_embeds.device).unsqueeze(0)
 
     if pixel_values is not None and pixel_values.numel() > 0: # Vision
         pixel_values = pixel_values.to(model.vision_tower.dtype)
@@ -42,7 +42,13 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
         inputs_embeds = inputs_embeds.to(image_feats.dtype)
         inputs_embeds = model._merge_with_image_features(inputs_embeds, input_ids, image_feats)
 
-    if lang_model.model._use_flash_attention_2:
+    use_flash_attention_2 = getattr(
+        lang_model.model,
+        '_use_flash_attention_2',
+        getattr(lang_model.model.config, '_attn_implementation', None) == 'flash_attention_2'
+    )
+
+    if use_flash_attention_2:
         attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
     else:
         attention_mask = _prepare_4d_causal_attention_mask(attention_mask, (B, N), inputs_embeds, 0,)
@@ -56,6 +62,8 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
     all_expert_outputs = []
 
     for layer_ix, layer in enumerate(lang_model.model.layers):
+        is_moe_layer = hasattr(layer.mlp, 'gate') and hasattr(layer.mlp, 'experts')
+
         # layer_outputs = layer(hidden_state, attention_mask = attention_mask, position_ids = position_ids,)
         residual = hidden_state
         hidden_state = layer.input_layernorm(hidden_state)
@@ -66,11 +74,11 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
         residual = hidden_state
         hidden_state = layer.post_attention_layernorm(hidden_state)
         # Return hidden states only for MoE layers
-        if 'DeepseekV3MLP' not in str(type(layer.mlp)) and return_hidden_states:
+        if is_moe_layer and return_hidden_states:
             all_pre_mlp_hidden_states.append(hidden_state.view(-1, hidden_state.shape[2]).detach().cpu())
 
         ## MLP
-        if 'DeepseekV3MLP' in str(type(layer.mlp)):
+        if not is_moe_layer:
             hidden_state = layer.mlp(hidden_state)
         else:
             identity = hidden_state
@@ -135,7 +143,7 @@ def run_kimivl_return_topk(model, input_ids, attention_mask, pixel_values = None
 
         hidden_state = residual + hidden_state
 
-        if 'DeepseekV3MLP' not in str(type(layer.mlp)):
+        if is_moe_layer:
             topk_ids, topk_weight, layer_expert_outputs = _sort_gate_tensors(
                 topk_ids.detach(),
                 topk_weight.detach(),

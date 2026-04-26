@@ -2,7 +2,10 @@
 Reversed engineered forward pass for Gemma 4
 - Supports google/gemma-4-26B-A4B-it (text-only path)
 - See https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma4/modeling_gemma4.py
-- Always assume eager expert implementation
+- A few notes:
+    - all_pre_mlp_hidden_states returns the actual post-LN/scaled router input, which for Gemma 4 is different than the dense input and the expert inputs!
+    - all_router_logits outputs router probs as this is a router obj output for Gemma 4, not logits
+    - all_topk_weights and other orders are sorted by BEFORE post-expert scaling (which Gemma 4 has)
 """
 import torch
 import torch.nn.functional as F
@@ -23,7 +26,7 @@ def run_gemma4_return_topk(model, input_ids, attention_mask, return_hidden_state
         - `all_topk_experts`: List (len = # MoE layers) of (BN, topk) expert IDs tensors
         - `all_topk_weights`: List (len = # MoE layers) of (BN, topk) expert weight tensors
         - `all_pre_mlp_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) pre-MLP activations
-        - `all_router_logits: (optional) List (len = # MoE layers) of (BN, n_experts) router *logits*
+        - `all_router_logits: (optional) List (len = # MoE layers) of (BN, n_experts) router *probs*
         - `all_hidden_states`: (optional) List (len = # MoE layers) of (BN, D) post-layer activations
         - `all_expert_outputs`: (optional) List (len = # MoE layers) of (BN, topk, D) pre-weighting expert outputs
     """
@@ -100,11 +103,6 @@ def run_gemma4_return_topk(model, input_ids, attention_mask, return_hidden_state
         # Dense FFN branch
         residual = hidden_state
         hidden_state = layer.pre_feedforward_layernorm(hidden_state)
-
-        if return_hidden_states:
-            # For Gemma4, the MoE branch originates from the post-attention residual stream.
-            all_pre_mlp_hidden_states.append(residual.view(-1, D).detach().cpu())
-
         hidden_states_1 = layer.mlp(hidden_state)
 
         if not layer.enable_moe_block:
@@ -127,8 +125,32 @@ def run_gemma4_return_topk(model, input_ids, attention_mask, return_hidden_state
         hidden_states_1 = layer.post_feedforward_layernorm_1(hidden_states_1)
 
         # MoE branch (uses the post-attention residual stream, not the dense-branch input)
-        hidden_states_flat = residual.view(-1, residual.shape[-1])  # (BN, D)
-        router_logits, top_k_weights, top_k_index = layer.router(hidden_states_flat)  # router_logits are probabilities in Gemma4
+        hidden_states_flat = residual.reshape(-1, residual.shape[-1])  # (BN, D)
+
+        # Router path: matches Gemma4TextRouter.forward(), but exposes the actual router projection input.
+        router_input = layer.router.norm(hidden_states_flat)
+        router_input = router_input * layer.router.scale * layer.router.scalar_root_size
+
+        router_logits_raw = layer.router.proj(router_input)
+        router_probs = torch.nn.functional.softmax(router_logits_raw, dim = -1)
+
+        # Top-k is sorted by unscaled router probabilities.
+        top_k_probs, top_k_index = torch.topk(
+            router_probs,
+            k = layer.router.config.top_k_experts,
+            dim = -1,
+            sorted = True,
+        )
+
+        # Actual expert coefficients: top-k renorm, then per-expert scale.
+        # Keep the original top-k order from router probabilities.
+        top_k_weights = top_k_probs / top_k_probs.sum(dim = -1, keepdim = True)
+        top_k_weights = top_k_weights * layer.router.per_expert_scale[top_k_index]
+
+        if return_hidden_states:
+            all_pre_mlp_hidden_states.append(router_input.detach().cpu())
+
+        # Expert input path is separate from router input
         hidden_states_2 = layer.pre_feedforward_layernorm_2(hidden_states_flat)
 
         experts = layer.experts
@@ -183,7 +205,7 @@ def run_gemma4_return_topk(model, input_ids, attention_mask, return_hidden_state
         all_topk_weights.append(top_k_weights.detach().cpu().to(torch.float32))
 
         if return_hidden_states:
-            all_router_logits.append(router_logits.detach().cpu())
+            all_router_logits.append(router_probs.detach().cpu())
             all_hidden_states.append(hidden_state.view(-1, D).detach().cpu())
             all_expert_outputs.append(layer_expert_outputs.detach().cpu())
 
