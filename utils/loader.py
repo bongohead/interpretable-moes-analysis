@@ -32,15 +32,15 @@ def get_supported_model_metadata(model_prefix):
     models = {
         'olmoe': ('allenai/OLMoE-1B-7B-0125-Instruct', 'olmoe', None, True, 16, 0),
         'qwen3-30b-a3b': ('Qwen/Qwen3-30B-A3B-Instruct-2507', 'qwen3moe', None, True, 48, 0),
-        'dsv2-lite': ('deepseek-ai/DeepSeek-V2-Lite', 'dsv2', None, True, 26, 1),
+        # 'dsv2-lite': ('deepseek-ai/DeepSeek-V2-Lite', 'dsv2', None, True, 26, 1),
         'gpt-oss-20b': ('openai/gpt-oss-20b', 'gptoss', 'kernels-community/vllm-flash-attn3', True, 24, 0),
         'gpt-oss-120b': ('openai/gpt-oss-120b', 'gptoss', 'kernels-community/vllm-flash-attn3', True, 36, 0),
-        'moonlight-a3b': ('moonshotai/Moonlight-16B-A3B', 'moonlight', None, True, 26, 1),
+        # 'moonlight-a3b': ('moonshotai/Moonlight-16B-A3B', 'moonlight', None, True, 26, 1),
         'kimivl-a3b': ('moonshotai/Kimi-VL-A3B-Instruct', 'kimivl', None, False, 26, 1),
         'granite-4.0-tiny': ('ibm-granite/granite-4.0-tiny-preview', 'granite', None, True, 40, 0),
         'ring-mini-2.0': ('inclusionAI/Ring-mini-2.0', 'ringmini2', None, False, 19, 1),
-        'glm-4.5-air': ('zai-org/GLM-4.5-Air-FP8', 'glm4moe', None, True, 45, 1),
-        'glm-4.7-flash': ('zai-org/GLM-4.7-Flash', 'glm4moelite', None, True, 46, 1),
+        # 'glm-4.5-air': ('zai-org/GLM-4.5-Air-FP8', 'glm4moe', None, True, 45, 1),
+        # 'glm-4.7-flash': ('zai-org/GLM-4.7-Flash', 'glm4moelite', None, True, 46, 1),
         'gemma-4-26b-a4b': ('google/gemma-4-26B-A4B-it', 'gemma4', None, True, 30, 0),
         'qwen3.5-35b-a3b': ('Qwen/Qwen3.5-35B-A3B', 'qwen35moe', None, True, 40, 0),
         'qwen3.6-35b-a3b': ('Qwen/Qwen3.6-35B-A3B', 'qwen35moe', None, True, 40, 0),
@@ -74,10 +74,15 @@ def load_model_and_tokenizer(model_prefix, device):
         - # dense layers
     """
     model_id, model_architecture, model_attn, model_use_hf, model_n_moe_layers, model_n_dense_layers = get_supported_model_metadata(model_prefix)
+    
 
     cache_dir = '/workspace/hf'
     tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir = cache_dir, add_eos_token = False, add_bos_token = False, padding_side = 'left', trust_remote_code = True)
-    load_params = {'cache_dir': cache_dir, 'dtype': 'auto', 'trust_remote_code': not model_use_hf, 'device_map': None, 'attn_implementation': model_attn}    
+    load_params = {'cache_dir': cache_dir, 'dtype': 'auto', 'trust_remote_code': not model_use_hf, 'device_map': None, 'attn_implementation': model_attn}
+
+    if not model_use_hf:
+        _patch_transformers_v5_remote_code_compat() # Compatability patchfix for remote code
+
     model = AutoModelForCausalLM.from_pretrained(model_id, **load_params).to(device).eval()
 
     # Check loaded in correct format (MXFP4 / FA3)
@@ -143,3 +148,54 @@ def load_custom_forward_pass(model_architecture, model = None, tokenizer = None)
         _verify_custom_forward_pass(model, tokenizer.pad_token_id)
 
     return run_forward_with_hs
+
+def _patch_transformers_v5_remote_code_compat():
+    """
+    Monkey patch to support a few remote codes made for transformers v4
+    """
+    import torch
+    import transformers.utils.import_utils as import_utils
+
+    if not hasattr(import_utils, 'is_torch_fx_available'):
+        def is_torch_fx_available():
+            try:
+                import torch.fx
+                return True
+            except Exception:
+                return False
+
+        import_utils.is_torch_fx_available = is_torch_fx_available
+
+    # Optional: also expose it from transformers.utils in case other remote-code files import from there.
+    import transformers.utils as utils
+    if not hasattr(utils, 'is_torch_fx_available'):
+        utils.is_torch_fx_available = import_utils.is_torch_fx_available
+
+def _patch_kimi_vl_rope_config_compat(config):
+    text_config = getattr(config, 'text_config', None)
+    if text_config is None:
+        return config
+
+    rope = getattr(text_config, 'rope_scaling', None)
+
+    # In case a newer transformers version exposed RoPE via a new field
+    if rope is None and isinstance(getattr(text_config, 'rope_parameters', None), dict):
+        rope = dict(text_config.rope_parameters)
+
+    if rope == {}:
+        rope = None
+
+    if isinstance(rope, dict):
+        rope = dict(rope)
+        rope_type = rope.get('type', rope.get('rope_type', 'default'))
+
+        # Old Kimi code expects `None` for default RoPE, not a dict with rope_type='default'
+        if rope_type == 'default':
+            text_config.rope_scaling = None
+        else:
+            rope['type'] = rope_type
+            text_config.rope_scaling = rope
+    else:
+        text_config.rope_scaling = None
+
+    return config
