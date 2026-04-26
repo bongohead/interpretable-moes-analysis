@@ -144,3 +144,65 @@ Notes:
         getattr(self.config, "rope_scaling", None)
     )
     ```
+
+3. Replace:
+
+    ```python
+    def tie_weights(self):
+        return self.language_model.tie_weights()
+    ```
+
+    with
+
+    ```python
+    def tie_weights(self, missing_keys = None, recompute_mapping = True):
+        return self.language_model.tie_weights(
+            missing_keys = missing_keys,
+            recompute_mapping = recompute_mapping,
+        )
+    ```
+
+4. To fix the deprecation warning, replace:
+    
+    ```python
+    from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+    ```
+
+    with 
+
+    ```python
+    from transformers.masking_utils import create_causal_mask
+    ```
+
+    And remove:
+
+    ```python
+    if is_torch_fx_available():
+        if not is_torch_greater_or_equal_than_1_13:
+            import torch.fx
+
+        _prepare_4d_causal_attention_mask = torch.fx.wrap(_prepare_4d_causal_attention_mask)
+    ```
+
+    And replace:
+    
+    ```python
+    attention_mask = _prepare_4d_causal_attention_mask(
+        attention_mask,
+        (batch_size, seq_length),
+        inputs_embeds,
+        past_key_values_length,
+    )
+    ```
+
+    with:
+
+    ```python
+    attention_mask = create_causal_mask(
+        config = self.config,
+        inputs_embeds = inputs_embeds,
+        attention_mask = attention_mask,
+        past_key_values = past_key_values,
+        position_ids = position_ids,
+    )
+    ```
