@@ -36,3 +36,6 @@ Before running analysis code, run through the following setup:
 <p align="center"><img src="images/mmlu-domains-umap.png" width="400px"><br><em>UMAP embeddings of l1 - l16 routing paths with Hamming distance</em></p>
 <p align="center"><img src="images/mmlu-math-routings.png" width="400px"><br><em>Routing of math versus non-math MMLU problems</em></p>
 <p align="center"><img src="images/mmlu-path-coverage.png" width="400px"><br><em>Percent of each l1-l10 path assigned to each MMLU domain</em></p>
+
+
+

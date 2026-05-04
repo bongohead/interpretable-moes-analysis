@@ -10,6 +10,8 @@ def render_single_gpt_oss(role: str, content: str) -> str:
         header = f"{role}<|message|>"
     elif role == 'assistant':
         header = f"assistant<|channel|>final<|message|>"
+    elif role == 'cot':
+        header = f"assistant<|channel|>analysis<|message|>"
     else:
         raise ValueError("Invalid role!")
     return f"<|start|>{header}{content}<|end|>"
